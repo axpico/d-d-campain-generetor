@@ -34,6 +34,8 @@ A browser app that generates complete D&D 5e (2024 rules) campaigns: villain, pl
     - sphere, cube, cone and line areas that hit everyone inside, allies included;
     - Hide requires real cover;
     - optional flanking, and automatic Shield reactions.
+  - **Voices:** the browser's built-in text-to-speech reads narration and dialogue, with a distinct, adjustable voice per speaker. Auto-play can wait for the voice to finish.
+  - **Automatic images:** a picture for each scene and battle, and/or whenever the DM calls `[IMAGE …]`. Images appear in the chat, in the campaign's art style.
   - **Map interaction:** humans click to move, attack or aim spells. AI seats get an ASCII coordinate map and can `MOVE: to F7` or `CAST: Fireball at H9`.
   - **At the table:** auto-play with pause, step and speed controls; live streaming; a turn tracker with HP and conditions; private "director" notes to the DM; DM tools usable any time; automatic music moods.
   - **Memory:** the full transcript is sent each turn, and only the oldest part is summarized once it exceeds your budget.

@@ -21,7 +21,7 @@ export interface Env {
 
 const MOODS: Mood[] = ['tavern', 'town', 'travel', 'forest', 'dungeon', 'battle', 'boss', 'horror', 'mystery', 'sea', 'sacred', 'calm'];
 
-export async function newGame(c: Campaign, s: Session, seats: Seat[], sheets: PcSheet[], contextChars = 60000, rules = { flanking: false, autoShield: true }): Promise<GameState> {
+export async function newGame(c: Campaign, s: Session, seats: Seat[], sheets: PcSheet[], contextChars = 60000, rules: NonNullable<GameState['rules']> = { flanking: false, autoShield: true, images: 'off' }): Promise<GameState> {
   await loadSrd();
   const g: GameState = {
     id: uid(), campaignId: c.id, sessionId: s.id, createdAt: Date.now(), updatedAt: Date.now(),
@@ -30,6 +30,8 @@ export async function newGame(c: Campaign, s: Session, seats: Seat[], sheets: Pc
     directorNotes: [], contextChars, mood: s.scenes[0]?.mood, sceneTheme: themeFor(c, s, 0), rules,
   };
   log(g, 'system', `Session ${s.number}: ${s.title} begins. Party: ${sheets.map((x) => `${x.name} (${x.species} ${x.cls} ${x.level})`).join(', ')}.`);
+  const sp = scenePrompt({ campaign: c, session: s } as Env, g);
+  requestImage(g, 'scene', sp.prompt, sp.caption);
   return g;
 }
 
@@ -55,6 +57,22 @@ function queuePlayers(g: GameState) {
   g.phase = g.playerQueue.length ? 'players' : 'dm';
 }
 
+function requestImage(g: GameState, kind: 'tag' | 'scene', prompt: string, caption: string) {
+  const mode = g.rules?.images ?? 'off';
+  if (mode === 'off' || (kind === 'tag' && mode === 'scenes') || (kind === 'scene' && mode === 'tags')) return;
+  g.imageRequests = [...(g.imageRequests ?? []), { id: uid(), prompt, caption, afterMsgId: g.log[g.log.length - 1]?.id }];
+}
+
+function scenePrompt(env: Env, g: GameState): { prompt: string; caption: string } {
+  const sc = env.session.scenes[Math.min(g.sceneIndex, env.session.scenes.length - 1)];
+  const loc = env.campaign.locations.find((l) => l.id === sc?.locationId);
+  const where = loc ? `${loc.name}, ${loc.summary}, ${loc.terrain}` : env.campaign.region.name;
+  return {
+    prompt: `Fantasy scene: ${sc?.title ?? 'adventure'}. ${where}. ${(sc?.readAloud ?? sc?.purpose ?? '').replace(/\s+/g, ' ').slice(0, 260)} Wide cinematic shot, no text`,
+    caption: `${sc?.title ?? 'Scene'}${loc ? ` — ${loc.name}` : ''}`,
+  };
+}
+
 function setMood(g: GameState, env: Env, m: Mood | undefined) {
   if (!m || !MOODS.includes(m) || g.mood === m) return;
   g.mood = m;
@@ -70,12 +88,21 @@ function handleDm(g: GameState, text: string, env: Env) {
     g.sceneIndex = fx.scene === 'next' ? Math.min(env.session.scenes.length, g.sceneIndex + 1) : Math.max(0, Math.min(env.session.scenes.length, fx.scene - 1));
     const sc = env.session.scenes[g.sceneIndex];
     g.sceneTheme = themeFor(env.campaign, env.session, g.sceneIndex);
-    if (sc) { log(g, 'system', `Scene ${g.sceneIndex + 1}: ${sc.title}`, { dmOnly: true }); if (!fx.mood) setMood(g, env, sc.mood); }
+    if (sc) {
+      log(g, 'system', `Scene ${g.sceneIndex + 1}: ${sc.title}`, { dmOnly: true });
+      if (!fx.mood) setMood(g, env, sc.mood);
+      const sp = scenePrompt(env, g);
+      requestImage(g, 'scene', sp.prompt, sp.caption);
+    }
   }
+  for (const p of fx.images) requestImage(g, 'tag', `Fantasy illustration: ${p}. No text`, p);
   setMood(g, env, fx.mood);
   if (fx.end) { g.status = 'ended'; log(g, 'system', 'The DM ends the session.'); return; }
   if (fx.combat) {
     g.phase = 'combat';
+    const foes = g.creatures.filter((c) => c.side === 'enemy' && !c.dead).map((c) => c.monster ?? c.name);
+    const sp = scenePrompt(env, g);
+    requestImage(g, 'scene', `Dramatic battle: adventurers face ${[...new Set(foes)].join(', ')}. ${sp.prompt}`, `Battle: ${[...new Set(foes)].join(', ')}`);
     if (!fx.mood) setMood(g, env, g.creatures.some((c) => c.legendary || (c.side === 'enemy' && c.maxHp > 100)) ? 'boss' : 'battle');
     return;
   }

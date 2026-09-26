@@ -445,6 +445,17 @@ details .image-slot.wide, .tab-panel > .card > .image-slot.wide { width: 100%; m
 .lg { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; }
 .lg-wall { background: #3a4450; } .lg-obstacle { background: #8a6a4a; border-radius: 50%; } .lg-difficult { background: #e2dccb; border: 1px solid #8a7a5a; } .lg-water { background: #9cc3dc; }
 
+/* ---------- Voice & chat images ---------- */
+.voice-panel { margin: 0; padding: 10px 12px; }
+.voice-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 0; }
+.voice-row select { width: auto; max-width: 260px; padding: 4px 8px; font-size: 0.85rem; }
+.msg-group { display: flex; flex-direction: column; gap: 8px; }
+.msg-group > .msg-dialogue { align-self: flex-start; }
+.msg-group > .msg-system, .msg-group > .msg-director, .msg-group > .msg-summary { align-self: center; }
+.chat-image { margin: 0; align-self: center; max-width: min(100%, 560px); }
+.chat-image img { width: 100%; border-radius: 10px; border: 1px solid var(--line); cursor: zoom-in; display: block; }
+.chat-image figcaption { text-align: center; margin-top: 4px; }
+
 /* ---------- Print ---------- */
 @media print {
   :root { --bg: #fff; --card: #fff; --ink: #000; --muted: #444; --line: #bbb; --shadow: none; color-scheme: light; }
