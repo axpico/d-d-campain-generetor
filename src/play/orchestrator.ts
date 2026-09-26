@@ -58,43 +58,92 @@ const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Does `text` address a character by full or first name? */
 const mentions = (text: string, name: string) => new RegExp(`\\b(${escapeRe(name)}|${escapeRe(firstName(name))})\\b`, 'i').test(text);
 
+/** Free-flow caps: lines per character and per round before the DM takes over. */
+const MAX_PER_PLAYER = 3;
+const maxPerRound = (g: GameState) => Math.max(6, aliveSeats(g).length * 2);
+
+/** Seats addressed by name in a text, in the order they are mentioned. */
+function addressed(g: GameState, text: string, exceptSeat?: string): Seat[] {
+  return aliveSeats(g)
+    .filter((s) => s.id !== exceptSeat && mentions(text, sheetFor(g, s)!.name))
+    .map((s) => {
+      const n = sheetFor(g, s)!.name;
+      const i = Math.min(...[n, n.split(/\s+/)[0]].map((x) => { const k = text.toLowerCase().indexOf(x.toLowerCase()); return k < 0 ? Infinity : k; }));
+      return { s, i };
+    })
+    .sort((a, b) => a.i - b.i)
+    .map((x) => x.s);
+}
+
 /**
- * Who reacts after the DM speaks. Round-robin: everyone, in seat order.
- * Free flow (default): characters the DM addressed by name first, then the rest in random order;
- * each may PASS, and characters addressed by another player get a chance to reply.
+ * Start a round of player talk after the DM speaks.
+ * Round-robin: everyone once, in seat order.
+ * Free flow (default): a live conversation. Whoever the DM addressed goes first; after every line the
+ * next speaker is whoever was addressed by name, otherwise a short "moderator" call picks the character
+ * who would naturally react — or hands back to the DM. So P1 → P2 → P1 → P4 → P1 → DM is possible.
  */
 function queuePlayers(g: GameState, dmText = '') {
   const seats = aliveSeats(g);
   g.roundSpoken = {};
   g.roundActs = 0;
+  g.roundPassed = [];
+  g.lastSpeaker = undefined;
+  if (!seats.length) { g.playerQueue = []; g.phase = 'dm'; return; }
   if ((g.rules?.flow ?? 'free') === 'round') {
     g.playerQueue = seats.map((s) => s.id);
   } else {
-    const named = seats.filter((s) => mentions(dmText, sheetFor(g, s)!.name));
-    const rest = seats.filter((s) => !named.includes(s)).sort(() => Math.random() - 0.5);
-    g.playerQueue = [...named, ...rest].map((s) => s.id);
+    const named = addressed(g, dmText);
+    g.playerQueue = named.length ? [named[0].id] : []; // empty = ask the moderator
   }
-  g.phase = g.playerQueue.length ? 'players' : 'dm';
+  g.phase = 'players';
 }
 
-/** After a player's turn in the players phase: react-queue, round bookkeeping, back to the DM when done. */
+function endRound(g: GameState) {
+  g.playerQueue = [];
+  g.quietRounds = (g.roundActs ?? 0) === 0 ? (g.quietRounds ?? 0) + 1 : 0;
+  g.phase = 'dm';
+}
+
+/** After a player's line: bookkeeping and who goes next. */
 function afterPlayer(g: GameState, seat: Seat, acted: boolean, said: string) {
   g.playerQueue.shift();
+  const free = (g.rules?.flow ?? 'free') === 'free';
   if (acted) {
     g.roundActs = (g.roundActs ?? 0) + 1;
     g.roundSpoken = { ...(g.roundSpoken ?? {}), [seat.id]: (g.roundSpoken?.[seat.id] ?? 0) + 1 };
-    if ((g.rules?.flow ?? 'free') === 'free') {
-      // Characters addressed by name get to answer (max twice per round each).
-      for (const other of aliveSeats(g)) {
-        if (other.id === seat.id || g.playerQueue.includes(other.id) || (g.roundSpoken?.[other.id] ?? 0) >= 2) continue;
-        if (mentions(said, sheetFor(g, other)!.name)) g.playerQueue.unshift(other.id);
-      }
-    }
+    g.lastSpeaker = seat.id;
+  } else {
+    g.roundPassed = [...new Set([...(g.roundPassed ?? []), seat.id])];
   }
-  if (!g.playerQueue.length) {
-    g.quietRounds = (g.roundActs ?? 0) === 0 ? (g.quietRounds ?? 0) + 1 : 0;
-    g.phase = 'dm';
+  if (!free) { if (!g.playerQueue.length) endRound(g); return; }
+  if ((g.roundActs ?? 0) >= maxPerRound(g)) { endRound(g); return; }
+  if (acted) {
+    // Addressed by name → that character answers next (even if they passed before).
+    const next = addressed(g, said, seat.id).find((s) => (g.roundSpoken?.[s.id] ?? 0) < MAX_PER_PLAYER);
+    g.playerQueue = next ? [next.id] : [];
   }
+  // Empty queue → the moderator decides on the next step.
+}
+
+/** Characters who may still take the floor this round. */
+function candidates(g: GameState): Seat[] {
+  return aliveSeats(g).filter((s) => s.id !== g.lastSpeaker && !(g.roundPassed ?? []).includes(s.id) && (g.roundSpoken?.[s.id] ?? 0) < MAX_PER_PLAYER);
+}
+
+/** One short call: who speaks next, or back to the DM. */
+async function moderate(g: GameState, env: Env): Promise<Seat | 'DM'> {
+  const cands = candidates(g);
+  if (!cands.length) return 'DM';
+  const recent = g.log.slice(-14).filter((m) => !m.dmOnly && ['narration', 'dialogue', 'action', 'roll'].includes(m.kind))
+    .map((m) => (m.kind === 'narration' ? `DM: ${m.text}` : m.kind === 'roll' ? `[dice] ${m.text}` : `${m.speaker}: ${m.text}`)).join('\n');
+  const who = cands.map((s) => { const sh = sheetFor(g, s)!; return `- ${sh.name} (${sh.species} ${sh.cls}${sh.personality ? `; ${sh.personality}` : ''}${g.roundSpoken?.[s.id] ? `; already spoke ${g.roundSpoken[s.id]}×` : ''})`; }).join('\n');
+  const text = await chat(seatLlm(dmSeat(g), env.llm), [
+    { role: 'system', content: 'You moderate the flow of conversation at a tabletop RPG table. You decide who speaks next. Reply with exactly one line: "NEXT: <character name>" or "NEXT: DM".' },
+    { role: 'user', content: `Recent table talk:\n${recent}\n\nCharacters who could speak now:\n${who}\n\nWho speaks next?\n- A character who was asked something, whose goals or backstory are touched, or who would naturally react or object.\n- "DM" if the players have agreed on what to do, asked the DM a question, attempted an action the DM must resolve, or the talk is going in circles.\nReply with only: NEXT: <name> or NEXT: DM` },
+  ], { maxTokens: 400, signal: env.signal });
+  const pick = text.match(/NEXT\s*:\s*(.+)/i)?.[1]?.trim() ?? text.trim();
+  if (/^\W*DM\b/i.test(pick) || /dungeon master/i.test(pick)) return 'DM';
+  return cands.find((s) => mentions(pick, sheetFor(g, s)!.name)) ?? 'DM';
 }
 
 function requestImage(g: GameState, kind: 'tag' | 'scene', prompt: string, caption: string) {
@@ -229,9 +278,16 @@ export async function step(g0: GameState, env: Env): Promise<GameState> {
     g.directorNotes = [];
     handleDm(g, text, env);
   } else if (g.phase === 'players') {
+    if (!g.playerQueue.length) {
+      if ((g.rules?.flow ?? 'free') === 'round') { endRound(g); return touch(g); }
+      const next = await moderate(g, env);
+      if (next === 'DM') endRound(g);
+      else g.playerQueue = [next.id];
+      return touch(g);
+    }
     const seatId = g.playerQueue[0];
     const seat = g.seats.find((s) => s.id === seatId);
-    if (!seat) { g.playerQueue.shift(); if (!g.playerQueue.length) g.phase = 'dm'; return touch(g); }
+    if (!seat) { g.playerQueue.shift(); return touch(g); }
     const me = creatureFor(g, seat);
     if (!me || isDown(me)) { afterPlayer(g, seat, false, ''); return touch(g); }
     if (seat.controller === 'human') { g.waitingFor = seat.id; return g; }

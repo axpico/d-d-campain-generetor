@@ -173,6 +173,8 @@ export interface GameState {
   rules?: { flanking: boolean; autoShield: boolean; images?: 'off' | 'tags' | 'scenes' | 'both'; flow?: 'free' | 'round' };
   roundSpoken?: Record<string, number>; // free flow: how often each seat spoke since the DM's last message
   roundActs?: number;
+  roundPassed?: string[]; // seats that passed this round (not asked again unless addressed)
+  lastSpeaker?: string; // seat id of the last player who spoke
   quietRounds?: number; // consecutive rounds where no player reacted
   imageRequests?: { id: string; prompt: string; afterMsgId?: string; caption: string }[];
   images?: { id: string; afterMsgId?: string; imageId: string; caption: string }[];

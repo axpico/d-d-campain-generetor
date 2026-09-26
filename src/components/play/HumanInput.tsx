@@ -37,7 +37,7 @@ export function HumanInput({ g, seat, name, busy, onSubmit, appendRef }: {
         <button className="btn primary" disabled={busy || (!text.trim() && !inCombat)} onClick={() => onSubmit(inCombat ? `${text}\nEND` : text)}>
           {inCombat ? 'End turn ▶' : 'Send ▶'}
         </button>
-        {!inCombat && seat.role === 'player' && <button className="btn ghost" disabled={busy} onClick={() => onSubmit('DO: waits and watches.')}>Pass</button>}
+        {!inCombat && seat.role === 'player' && <button className="btn ghost" disabled={busy} onClick={() => onSubmit('PASS')}>Pass</button>}
         <span className="muted small">Ctrl+Enter to send</span>
       </div>
     </div>
