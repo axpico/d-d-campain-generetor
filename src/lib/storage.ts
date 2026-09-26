@@ -1,9 +1,10 @@
 // IndexedDB persistence: campaigns and generated images (images can be large blobs,
 // which would blow through localStorage's ~5 MB limit).
 import type { Campaign } from './types';
+import type { GameState } from '../play/types';
 
 const DB_NAME = 'dnd-campaign-generator';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -15,6 +16,7 @@ function db(): Promise<IDBDatabase> {
         const d = req.result;
         if (!d.objectStoreNames.contains('campaigns')) d.createObjectStore('campaigns', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('images')) d.createObjectStore('images', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('games')) d.createObjectStore('games', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -36,6 +38,12 @@ export const campaignsDb = {
   get: (id: string) => tx<Campaign | undefined>('campaigns', 'readonly', (s) => s.get(id)),
   put: (c: Campaign) => tx('campaigns', 'readwrite', (s) => s.put(c)),
   delete: (id: string) => tx('campaigns', 'readwrite', (s) => s.delete(id)),
+};
+
+export const gamesDb = {
+  get: (id: string) => tx<GameState | undefined>('games', 'readonly', (s) => s.get(id)),
+  put: (g: GameState) => tx('games', 'readwrite', (s) => s.put(g)),
+  delete: (id: string) => tx('games', 'readwrite', (s) => s.delete(id)),
 };
 
 export interface StoredImage {

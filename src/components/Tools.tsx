@@ -7,55 +7,9 @@ import { buildEncounter, rollLoot } from '../gen/encounter';
 import { loadSetting, saveSetting } from '../lib/storage';
 import type { Env } from '../data/monsters';
 import { EncounterCard, Loot } from './bits';
+import { roll, type Roll } from '../lib/dice';
 
 // ---------- Dice ----------
-interface Roll { expr: string; total: number; detail: string; at: number }
-
-/** Parse and roll expressions like "2d6+3", "d20", "4d6kh3", "1d20 adv", "3d8 + 1d6 - 2". */
-export function roll(exprRaw: string): Roll {
-  let expr = exprRaw.trim().toLowerCase();
-  let mode: 'adv' | 'dis' | undefined;
-  if (/\s*(adv|advantage)$/.test(expr)) { mode = 'adv'; expr = expr.replace(/\s*(adv|advantage)$/, ''); }
-  if (/\s*(dis|disadvantage)$/.test(expr)) { mode = 'dis'; expr = expr.replace(/\s*(dis|disadvantage)$/, ''); }
-  const terms = expr.replace(/\s+/g, '').match(/[+-]?[^+-]+/g);
-  if (!terms) throw new Error('Try something like 2d6+3');
-  let total = 0;
-  const parts: string[] = [];
-  for (const t of terms) {
-    const sign = t.startsWith('-') ? -1 : 1;
-    const body = t.replace(/^[+-]/, '');
-    const m = body.match(/^(\d*)d(\d+|%)(?:(kh|kl)(\d+))?$/);
-    if (m) {
-      const n = Math.min(100, Number(m[1] || 1));
-      const sides = m[2] === '%' ? 100 : Number(m[2]);
-      if (!sides) throw new Error(`Bad die: ${body}`);
-      const r = () => 1 + Math.floor(Math.random() * sides);
-      let rolls = Array.from({ length: n }, r);
-      if (mode && n === 1 && sides === 20) {
-        const b = r();
-        const pick = mode === 'adv' ? Math.max(rolls[0], b) : Math.min(rolls[0], b);
-        parts.push(`${sign < 0 ? '−' : ''}d20 ${mode} [${rolls[0]}, ${b}] → ${pick}`);
-        total += sign * pick;
-        continue;
-      }
-      let kept = rolls;
-      if (m[3]) {
-        const k = Number(m[4]);
-        const sorted = [...rolls].sort((a, b) => (m[3] === 'kh' ? b - a : a - b));
-        kept = sorted.slice(0, k);
-      }
-      const sum = kept.reduce((a, b) => a + b, 0);
-      total += sign * sum;
-      parts.push(`${sign < 0 ? '−' : ''}${n}d${sides}${m[3] ? m[3] + m[4] : ''} [${rolls.join(', ')}]`);
-      rolls = [];
-    } else if (/^\d+$/.test(body)) {
-      total += sign * Number(body);
-      parts.push(`${sign < 0 ? '−' : '+'}${body}`);
-    } else throw new Error(`Can't read "${body}"`);
-  }
-  return { expr: exprRaw.trim(), total, detail: parts.join(' '), at: Date.now() };
-}
-
 function Dice() {
   const [expr, setExpr] = useState('1d20');
   const [log, setLog] = useState<Roll[]>([]);

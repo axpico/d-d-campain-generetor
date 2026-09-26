@@ -347,6 +347,75 @@ details .image-slot.wide, .tab-panel > .card > .image-slot.wide { width: 100%; m
   body.print-session .print-only { display: none !important; }
 }
 
+
+/* ---------- Play ---------- */
+.play-setup { max-width: 980px; margin: 0 auto; }
+.seat-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.seat-row:last-of-type { border-bottom: 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--bg); color: var(--ink); padding: 5px 10px; font: inherit; font-size: 0.85rem; cursor: pointer; }
+.seg button.on { background: var(--accent); color: var(--accent-ink); }
+.model-pick { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.model-pick select, .model-pick input { width: auto; min-width: 140px; padding: 5px 8px; font-size: 0.85rem; }
+.sheet { margin: 10px 0 0; padding: 12px 14px; }
+.sheet-body h4 { margin-top: 14px; }
+.grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 0 12px; }
+.abilities { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.ability { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 8px; padding: 6px; font-weight: 700; }
+.ability input[type='number'] { text-align: center; padding: 4px; }
+.save-prof { font-weight: 400; font-size: 0.75rem; display: flex; gap: 4px; align-items: center; }
+.chip.exp { outline: 2px solid var(--gold); }
+.atk-table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+.atk-table th { text-align: left; font-size: 0.75rem; color: var(--muted); font-weight: 600; padding: 2px 4px; }
+.atk-table td { padding: 2px; }
+.atk-table input { padding: 4px 6px; font-size: 0.85rem; }
+.slots { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.slot { display: flex; flex-direction: column; align-items: center; font-size: 0.75rem; }
+.slot input { width: 46px; padding: 3px; text-align: center; }
+.inline-check { display: inline-flex; margin-left: 10px; font-family: var(--sans); font-weight: 400; }
+
+.game { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.game-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.game-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.game-controls select { width: auto; }
+.chat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; height: min(62vh, 720px); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.msg { max-width: 92%; border-radius: 10px; padding: 8px 12px; line-height: 1.45; }
+.msg-who { font-size: 0.75rem; font-weight: 700; color: var(--muted); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+.msg-text { white-space: pre-wrap; word-break: break-word; }
+.msg-narration { background: var(--bg); border-left: 4px solid var(--gold); font-family: var(--serif); font-size: 1.08rem; max-width: 100%; }
+.msg-dialogue { background: color-mix(in srgb, var(--ally) 12%, var(--card)); align-self: flex-start; }
+.msg-dialogue.side-enemy { background: color-mix(in srgb, var(--enemy) 12%, var(--card)); }
+.msg-action { background: transparent; font-style: italic; color: var(--muted); padding: 2px 12px; }
+.msg-roll { background: var(--bg-2); font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 100%; }
+.msg-system { color: var(--muted); font-size: 0.8rem; text-align: center; align-self: center; padding: 2px 8px; }
+.msg-director, .msg-summary { color: var(--gold); font-size: 0.8rem; align-self: center; border: 1px dashed var(--gold); }
+.msg-stream { background: var(--bg); border: 1px dashed var(--line); opacity: 0.85; max-width: 100%; }
+.typing { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.human-input { margin: 0; border-left: 4px solid var(--accent); }
+.human-input textarea { margin-top: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+.builder { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.builder select, .builder input { width: auto; padding: 5px 8px; font-size: 0.85rem; }
+.builder-sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+.end-card { margin: 0; border-left: 4px solid var(--ally); }
+.game-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 64px; }
+.game-side .card { margin: 0; padding: 12px; }
+.tracker { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.tracker li { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.tracker li.current { outline: 2px solid var(--gold); }
+.tracker li.enemy { border-left: 4px solid var(--enemy); }
+.tracker li.party { border-left: 4px solid var(--ally); }
+.tracker li.down, .tracker li.dead { opacity: 0.6; }
+.tracker-head { display: flex; justify-content: space-between; gap: 6px; }
+.hpbar { height: 6px; background: var(--bg-2); border-radius: 3px; overflow: hidden; margin: 4px 0 2px; }
+.hpbar > div { height: 100%; background: var(--ally); transition: width 0.4s; }
+.tracker li.enemy .hpbar > div { background: var(--enemy); }
+@media (max-width: 900px) {
+  .game { grid-template-columns: 1fr; }
+  .game-side { position: static; }
+  .abilities { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .chat { height: 55vh; }
+}
+
 /* ---------- Print ---------- */
 @media print {
   :root { --bg: #fff; --card: #fff; --ink: #000; --muted: #444; --line: #bbb; --shadow: none; color-scheme: light; }
