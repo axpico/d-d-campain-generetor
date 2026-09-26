@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MutableRefObject } from 'react';
 import type { GameState, Seat } from '../../play/types';
 import { SKILLS } from '../../play/types';
 import { currentCreature, distance, isDown } from '../../play/engine';
@@ -7,9 +7,16 @@ import { MOOD_LABEL } from '../../gen/session';
 
 type Act = 'ATTACK' | 'CAST' | 'MOVE toward' | 'MOVE away from' | 'MULTIATTACK' | 'USE' | 'DASH' | 'DODGE' | 'DISENGAGE' | 'HIDE' | 'HELP' | 'POTION' | 'SHOVE' | 'GRAPPLE' | 'FEATURE' | 'SAY';
 
-export function HumanInput({ g, seat, name, busy, onSubmit }: { g: GameState; seat: Seat; name: string; busy: boolean; onSubmit: (text: string) => void }) {
+export function HumanInput({ g, seat, name, busy, onSubmit, appendRef }: {
+  g: GameState; seat: Seat; name: string; busy: boolean; onSubmit: (text: string) => void; appendRef?: MutableRefObject<((line: string) => void) | null>;
+}) {
   const [text, setText] = useState('');
   useEffect(() => { setText(''); }, [g.waitingFor, g.combat?.index, g.phase]);
+  useEffect(() => {
+    if (!appendRef) return;
+    appendRef.current = (line) => setText((t) => (t ? `${t}\n${line}` : line));
+    return () => { appendRef.current = null; };
+  }, [appendRef]);
   const inCombat = g.phase === 'combat' && !!g.combat;
   const me = inCombat ? currentCreature(g) : undefined;
 

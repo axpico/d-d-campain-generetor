@@ -17,8 +17,9 @@ import type { Mood } from '../lib/types';
 import { ABILITIES, ABILITY_NAME, SKILLS, type Ability, type Attack, type Creature, type GameState } from './types';
 import {
   abilityCheck, addCondition, applyDamage, bestMelee, castSpell, distance, findCreature, findSpell, has, heal, incapacitated, isDown,
-  log, makeAttack, move, removeCondition, rest, savingThrow, sheetOf, startCombat,
+  log, makeAttack, move, moveTo, removeCondition, rest, savingThrow, sheetOf, startCombat,
 } from './engine';
+import { creaturesInArea, parseCoord, sight } from './map';
 
 const clean = (line: string) => line.replace(/^[\s>*\-•]+/, '').replace(/\*\*/g, '').trim();
 
@@ -87,17 +88,23 @@ export function runCombatCommands(g: GameState, actor: Creature, text: string): 
     if ((m = line.match(/^SAY\s*:\s*(.+)$/i))) { res.said.push(m[1].trim()); continue; }
     if (/^END(\s+TURN)?\.?$/i.test(line)) { res.endTurn = true; break; }
 
+    if ((m = line.match(/^MOVE\s*:?\s*(?:to\s+)?([A-Z]{1,2}\s*\d{1,2})\.?$/i)) && parseCoord(m[1])) {
+      const p = parseCoord(m[1])!;
+      if (e.move <= 0) { out(`(${actor.name} has no movement left.)`); continue; }
+      const r = moveTo(g, actor, p.x, p.y, e.move);
+      e.move -= r.used;
+      out(r.text);
+      continue;
+    }
     if ((m = line.match(/^MOVE\s*:?\s*(toward|towards|to|closer to|next to|adjacent to|away from)?\s*(.+?)(?:\s+(\d+)\s*(?:ft|feet))?\.?$/i))) {
       const away = /away/i.test(m[1] ?? '');
       const t = findCreature(g, m[2], { alive: true });
       if (!t) { out(`(${actor.name} can't find "${m[2]}" to move ${away ? 'away from' : 'toward'}.)`); continue; }
-      const want = m[3] ? Number(m[3]) : e.move;
-      const ft = Math.min(e.move, want);
+      const ft = Math.min(e.move, m[3] ? Number(m[3]) : e.move);
       if (ft <= 0) { out(`(${actor.name} has no movement left.)`); continue; }
-      const before = { ...actor.pos };
-      out(move(g, actor, t, ft, away));
-      const used = Math.max(Math.abs(actor.pos.x - before.x), Math.abs(actor.pos.y - before.y)) * 5;
-      e.move -= Math.max(used, 0);
+      const r = move(g, actor, t, ft, away);
+      e.move -= r.used;
+      out(r.text);
       continue;
     }
 
@@ -129,9 +136,9 @@ export function runCombatCommands(g: GameState, actor: Creature, text: string): 
       }
       // Auto-approach for melee if close enough to reach this turn
       if (a.reach && !a.range && distance(actor, t) > a.reach && e.move > 0 && distance(actor, t) - a.reach <= e.move) {
-        const before = { ...actor.pos };
-        out(move(g, actor, t, e.move));
-        e.move -= Math.max(Math.abs(actor.pos.x - before.x), Math.abs(actor.pos.y - before.y)) * 5;
+        const r = move(g, actor, t, e.move);
+        e.move -= r.used;
+        out(r.text);
       }
       const result = makeAttack(g, actor, t, a, { extra });
       if (sneak && !/→ (hit|CRITICAL)/.test(result)) actor.used.sneak = false; // only spent on a hit
@@ -153,7 +160,12 @@ export function runCombatCommands(g: GameState, actor: Creature, text: string): 
       const isBonus = sp.time === 'bonus' || bonus;
       if (sp.time !== 'reaction' && !(isBonus ? needBonus(`cast ${sp.name}`) : needAction(`cast ${sp.name}`))) continue;
       const hostile = sp.kind === 'attack' || sp.kind === 'save' || sp.kind === 'auto';
-      const tg = targetsFrom(g, m[3], actor, hostile);
+      const point = m[3] ? parseCoord(m[3]) : undefined;
+      const tg = point ? [] : targetsFrom(g, m[3], actor, hostile);
+      if (point) {
+        out(castSpell(g, actor, sp, tg, Number(m[2] ?? sp.level), point));
+        continue;
+      }
       if (sp.name === 'Divine Smite' && tg[0]) {
         out(castSpell(g, actor, sp, tg, Number(m[2] ?? 1)));
         continue;
@@ -170,9 +182,9 @@ export function runCombatCommands(g: GameState, actor: Creature, text: string): 
         const t = tg[i % Math.max(1, tg.length)] ?? targetsFrom(g, undefined, actor)[0];
         if (!t || t.dead) return;
         if (a.reach && distance(actor, t) > a.reach && e.move > 0) {
-          const before = { ...actor.pos };
-          out(move(g, actor, t, e.move));
-          e.move -= Math.max(Math.abs(actor.pos.x - before.x), Math.abs(actor.pos.y - before.y)) * 5;
+          const r = move(g, actor, t, e.move);
+          e.move -= r.used;
+          out(r.text);
         }
         out(makeAttack(g, actor, t, a));
       });
@@ -198,8 +210,15 @@ export function runCombatCommands(g: GameState, actor: Creature, text: string): 
         const dmg = (a.dmg ?? []).map(([dice, type]) => [roll(dice).total, type] as [number, string]);
         if (dmg.length) lines.push(`Damage roll: ${dmg.map(([n, t]) => `${n} ${t}`).join(' + ')}.`);
         const area = a.area?.[1] ?? 0;
-        for (const t of tg.filter((t2, i) => i === 0 || !area || distance(tg[0], t2) <= area)) {
-          const s = savingThrow(g, t, a.save, a.dc);
+        let victims = tg.filter((t2, i) => i === 0 || !area || distance(tg[0], t2) <= area);
+        if (g.map && a.area && tg[0]) {
+          const shape = a.area[0];
+          const fromSelf = shape === 'cone' || shape === 'line';
+          victims = creaturesInArea(g, fromSelf ? { shape, size: a.area[1], origin: actor.pos, toward: tg[0].pos } : { shape, size: a.area[1], origin: tg[0].pos }, actor);
+          lines.push(`Area (${a.area[1]}-ft ${shape}): ${victims.map((v) => v.name).join(', ') || 'no one'}.`);
+        }
+        for (const t of victims) {
+          const s = savingThrow(g, t, a.save, a.dc, g.map ? sight(g, actor, t).cover : 0);
           let l = s.text;
           if (dmg.length) l += '. ' + (s.ok ? (a.half ? applyDamage(g, t, dmg.map(([n, ty]) => [Math.floor(n / 2), ty])) : 'No damage.') : applyDamage(g, t, dmg));
           if (!s.ok && a.cond) l += ' ' + addCondition(t, { name: a.cond, save: { ability: a.save, dc: a.dc }, sourceId: actor.id });
@@ -221,6 +240,8 @@ export function runCombatCommands(g: GameState, actor: Creature, text: string): 
       if (what === 'DODGE') { addCondition(actor, { name: 'dodging' }); out(`${actor.name} takes the Dodge action.`); }
       if (what === 'DISENGAGE') { addCondition(actor, { name: 'disengaged' }); out(`${actor.name} disengages.`); }
       if (what === 'HIDE') {
+        const watchers = g.creatures.filter((o) => o.side !== actor.side && !isDown(o) && !incapacitated(o) && sight(g, o, actor).visible && sight(g, o, actor).cover < 5);
+        if (g.map && watchers.length) { out(`${actor.name} can't hide in plain sight of ${watchers.map((w) => w.name).join(', ')} (needs three-quarters cover or to be out of sight).`); continue; }
         const r = abilityCheck(g, actor, 'Stealth', 15);
         out(r.text);
         if (r.ok) addCondition(actor, { name: 'hidden' });

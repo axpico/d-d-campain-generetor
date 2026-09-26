@@ -6,6 +6,7 @@ import { mod } from '../lib/dice';
 import type { Creature, GameState, PcSheet, Seat } from './types';
 import { distance, has, isDown, sheetOf } from './engine';
 import { SPELLS } from './spells';
+import { asciiMap, coordName, sight } from './map';
 
 export function seatLlm(seat: Seat, def: LlmSettings): LlmSettings {
   if (seat.model.useDefault || !seat.model.provider) return def;
@@ -74,12 +75,27 @@ function creatureLine(c: Creature, from: Creature | undefined, exact: boolean) {
   const conds = c.conditions.map((x) => x.name).join(', ');
   const hp = exact || c.side === 'party' ? `${c.hp}/${c.maxHp} HP${c.tempHp ? ` +${c.tempHp} temp` : ''}` : hpWord(c);
   const dist = from && from !== c ? `, ${distance(from, c)} ft away` : '';
-  return `- ${c.name} (${c.side}${c.monster && exact ? `, ${c.monster}, AC ${c.ac}` : ''}): ${hp}${conds ? `, ${conds}` : ''}${dist}${c.concentration ? `, concentrating on ${c.concentration.spell}` : ''}`;
+  const at = `at ${coordName(c.pos.x, c.pos.y)}`;
+  return `- ${c.name} (${c.side}${c.monster && exact ? `, ${c.monster}, AC ${c.ac}` : ''}) ${at}: ${hp}${conds ? `, ${conds}` : ''}${dist}${c.concentration ? `, concentrating on ${c.concentration.spell}` : ''}`;
 }
 
 function battlefield(g: GameState, from: Creature | undefined, exact: boolean) {
   const order = g.combat ? g.combat.order.map((id) => g.creatures.find((c) => c.id === id)!).filter((c) => c && !(c.dead && c.kind === 'monster')) : g.creatures;
-  return order.map((c) => creatureLine(c, from, exact)).join('\n');
+  const list = order.map((c) => {
+    let l = creatureLine(c, from, exact);
+    if (from && from !== c && g.map) {
+      const v = sight(g, from, c);
+      l += !v.visible ? ' — NO line of sight' : v.cover ? ` — ${v.cover === 2 ? 'half' : 'three-quarters'} cover` : '';
+    }
+    return l;
+  }).join('\n');
+  if (!g.map) return list;
+  const a = asciiMap(g);
+  return `MAP (columns A-${coordName(g.map.w - 1, 0).replace(/\d+$/, '')}, rows 1-${g.map.h}; # wall, o obstacle/cover, , difficult terrain, ~ water, . open; each square is 5 ft):
+${a.map}
+${a.legend}
+
+${list}`;
 }
 
 function sheetSummary(sh: PcSheet, c?: Creature) {
@@ -163,7 +179,7 @@ ${g.directorNotes.length ? `\nDirector notes: ${g.directorNotes.join('; ')}` : '
 Remaining this turn: ${e.action ? 'action' : 'no action'}, ${e.bonus ? 'bonus action' : 'no bonus'}, ${e.move} ft movement.
 Play it smart but fair: intelligent foes focus on threats and casters; beasts attack the nearest; creatures below a quarter HP may flee (MOVE: away from X).
 Reply with ONE optional line "NARRATE: <one vivid sentence>", then commands, one per line, then END. Commands:
-MOVE: toward <target> | MOVE: away from <target>
+MOVE: toward <target> | MOVE: away from <target> | MOVE: to <square, e.g. F7>
 MULTIATTACK: <target>        ATTACK: <target> with <attack name>
 USE: <action name> on <target1>, <target2>   (save-based/area abilities)
 CAST: <spell> on <target>    DASH | DODGE | DISENGAGE | HIDE
@@ -227,14 +243,14 @@ ${g.log.slice(-10).filter((x) => !x.dmOnly).map(line).join('\n')}
 
 Choose your turn. Reply with commands, one per line, then END:
 SAY: "short battle line" (optional)
-MOVE: toward <target> [N ft]  |  MOVE: away from <target>
+MOVE: toward <target> [N ft]  |  MOVE: away from <target>  |  MOVE: to <square, e.g. F7>
 ATTACK: <target> with <weapon>   (repeat the line for each attack you get; add "+ Sneak Attack" etc. if a feature applies)
-CAST: <spell> [at level N] on <target>[, <target2>]
+CAST: <spell> [at level N] on <target>[, <target2>]   (area spells: CAST Fireball at <square> — it hits EVERYONE in the area, allies too)
 BONUS: <a bonus-action command>, e.g. BONUS: CAST Healing Word on <ally> | BONUS: DASH (Cunning Action)
 FEATURE: <feature name> [on <target>]   (Second Wind, Rage, Action Surge, Lay on Hands 10…)
 DODGE | DISENGAGE | HIDE | DASH | HELP: <ally> | POTION [: <ally>] | SHOVE: <target> | GRAPPLE: <target>
 END
-Rules reminder: melee needs you within reach (5 ft); moving out of an enemy's reach provokes an opportunity attack unless you DISENGAGE. Unconscious allies need healing fast.`;
+Rules reminder: melee needs you within reach (5 ft); moving out of an enemy's reach provokes an opportunity attack unless you DISENGAGE. Walls block movement and sight; obstacles give cover (+2/+5 AC); difficult terrain costs double. Hiding needs three-quarters cover or being out of sight. Unconscious allies need healing fast.`;
 }
 
 export const isHelpless = (c: Creature) => isDown(c) || has(c, 'unconscious');

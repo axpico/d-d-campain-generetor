@@ -9,6 +9,7 @@ import { gamesDb } from '../../lib/storage';
 import { useApp } from '../context';
 import { SheetEditor } from './SheetEditor';
 import { HumanInput } from './HumanInput';
+import { BattleMapView, type MapMode } from './BattleMapView';
 
 export function PlayView({ c, onChange, sessionId }: { c: Campaign; onChange: (c: Campaign) => void; sessionId?: string }) {
   const [selSession, setSelSession] = useState(sessionId ?? (c.sessions.find((s) => s.status !== 'played') ?? c.sessions[0])?.id);
@@ -65,6 +66,8 @@ function PlaySetup({ c, onChange, session, sessions, onSession, onStart }: {
   const [seats, setSeats] = useState<Record<string, Seat>>({});
   const seatOf = (sh: PcSheet): Seat => seats[sh.id] ?? { id: `seat-${sh.id}`, role: 'player', controller: 'ai', sheetId: sh.id, model: { useDefault: true } };
   const [budget, setBudget] = useState(60000);
+  const [flanking, setFlanking] = useState(false);
+  const [autoShield, setAutoShield] = useState(true);
   const aiNeeded = dm.controller === 'ai' || sheets.some((sh) => seatOf(sh).controller === 'ai');
 
   return (
@@ -115,12 +118,14 @@ function PlaySetup({ c, onChange, session, sessions, onSession, onStart }: {
           <input type="number" min={8000} step={4000} value={budget} onChange={(e) => setBudget(Math.max(8000, Number(e.target.value) || 60000))} />
         </label>
         <p className="muted small">The full transcript is sent every turn. Only if it grows past this size are the oldest events summarized, so small-context free models don't break. ~4 characters ≈ 1 token.</p>
+        <label className="check"><input type="checkbox" checked={flanking} onChange={(e) => setFlanking(e.target.checked)} /> <span>Optional rule: <strong>flanking</strong> (advantage on melee attacks when an ally is on the opposite side of the target)</span></label>
+        <label className="check"><input type="checkbox" checked={autoShield} onChange={(e) => setAutoShield(e.target.checked)} /> <span>Casters who know <strong>Shield</strong> cast it automatically when it would turn a hit into a miss</span></label>
         {aiNeeded && !llm.enabled && <p className="note warn">⚠ AI seats need a provider. Set one up in Settings, or make every seat human.</p>}
         <div className="form-actions">
           <button className="btn primary big" disabled={aiNeeded && !llm.enabled} onClick={async () => {
             try {
               const allSeats: Seat[] = [dm, ...sheets.map((sh) => seatOf(sh))];
-              onStart(await newGame(c, session, allSeats, sheets, budget));
+              onStart(await newGame(c, session, allSeats, sheets, budget, { flanking, autoShield }));
             } catch (e) { toast(`Couldn't start: ${(e as Error).message}`, 'error'); }
           }}>⚔ Start the game</button>
         </div>
@@ -173,6 +178,9 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
   const [kick, setKick] = useState(0);
   const [note, setNote] = useState('');
   const [tools, setTools] = useState('');
+  const [mapMode, setMapMode] = useState<MapMode>('move');
+  const [aimSpell, setAimSpell] = useState('');
+  const appendRef = useRef<((line: string) => void) | null>(null);
   const gRef = useRef(g);
   gRef.current = g;
   const abortRef = useRef<AbortController | null>(null);
@@ -255,6 +263,35 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
           <span className="muted small">{g.combat ? `⚔ Round ${g.combat.round} · ${cur?.name}'s turn` : `Scene ${Math.min(g.sceneIndex + 1, session.scenes.length)}/${session.scenes.length}: ${session.scenes[g.sceneIndex]?.title ?? 'wrap-up'}`}</span>
         </div>
 
+        {g.map && g.combat && (() => {
+          const humanTurn = !!waitingSeat && !!cur && (waitingSeat.role === 'dm' ? cur.kind !== 'pc' : waitingSeat.sheetId === cur.sheetId);
+          const areaSpells = cur?.spell?.known ?? [];
+          const push = (line: string) => appendRef.current?.(line);
+          return (
+            <div className="card battlemap-card">
+              {humanTurn && (
+                <div className="bm-toolbar">
+                  <span className="small">Click the map to:</span>
+                  <div className="seg" role="group">
+                    <button className={mapMode === 'move' ? 'on' : ''} onClick={() => setMapMode('move')}>Move / attack</button>
+                    {areaSpells.length > 0 && <button className={mapMode === 'aim' ? 'on' : ''} onClick={() => setMapMode('aim')}>Aim a spell</button>}
+                  </div>
+                  {mapMode === 'aim' && (
+                    <select value={aimSpell || areaSpells[0]} onChange={(e) => setAimSpell(e.target.value)} aria-label="Spell to aim">
+                      {areaSpells.map((sp) => <option key={sp}>{sp}</option>)}
+                    </select>
+                  )}
+                  <span className="muted small">{mapMode === 'move' ? 'Highlighted squares are within your movement. Click an enemy to attack it.' : 'Click a square (area spells) or a creature (single target).'}</span>
+                </div>
+              )}
+              <BattleMapView g={g} current={cur} interactive={humanTurn} mode={humanTurn ? mapMode : 'look'}
+                onCell={(coord) => push(mapMode === 'aim' ? `CAST: ${aimSpell || areaSpells[0]} at ${coord}` : `MOVE: to ${coord}`)}
+                onToken={(t) => push(mapMode === 'aim' ? `CAST: ${aimSpell || areaSpells[0]} on ${t.name}` : t.side !== cur?.side ? `ATTACK: ${t.name}` : `MOVE: toward ${t.name}`)} />
+              <div className="bm-legend muted small"><span className="lg lg-wall" /> wall <span className="lg lg-obstacle" /> obstacle (cover) <span className="lg lg-difficult" /> difficult <span className="lg lg-water" /> water · 1 square = 5 ft · hover a token for details</div>
+            </div>
+          );
+        })()}
+
         <div className="chat" ref={logRef}>
           {g.log.map((m) => (
             <div key={m.id} className={`msg msg-${m.kind} ${m.side ? `side-${m.side}` : ''} ${m.dmOnly ? 'dm-only' : ''}`}>
@@ -272,7 +309,7 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
         </div>
 
         {g.waitingFor && waitingSeat && g.status === 'running' && (
-          <HumanInput g={g} seat={waitingSeat} name={waitingName ?? ''} busy={busy} onSubmit={submit} />
+          <HumanInput g={g} seat={waitingSeat} name={waitingName ?? ''} busy={busy} onSubmit={submit} appendRef={appendRef} />
         )}
 
         {g.status === 'ended' && (

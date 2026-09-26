@@ -27,6 +27,14 @@ A browser app that generates complete D&D 5e (2024 rules) campaigns: villain, pl
   - **The code owns the rules:** dice, attacks with advantage/disadvantage from conditions, crits, resistances, saves, concentration, death saves, the action economy, opportunity attacks, recharge abilities, legendary actions, rests. The models only choose actions and narrate.
   - **Full character sheets** with a class/level template to start from. About 70 core spells are automated; any other spell or feature is adjudicated by the DM through tags that the engine rolls.
   - **Monster stat blocks** come from the SRD for every encounter.
+  - **Tactical battle map** built from the scene (dungeon, cave, forest, town, open ground):
+    - walls, obstacles that give cover, difficult terrain and water;
+    - A* movement where you can pass through allies but enemies block, with an opportunity attack checked at every square;
+    - line of sight and half or three-quarters cover (+2/+5 AC, and to Dex saves);
+    - sphere, cube, cone and line areas that hit everyone inside, allies included;
+    - Hide requires real cover;
+    - optional flanking, and automatic Shield reactions.
+  - **Map interaction:** humans click to move, attack or aim spells. AI seats get an ASCII coordinate map and can `MOVE: to F7` or `CAST: Fireball at H9`.
   - **At the table:** auto-play with pause, step and speed controls; live streaming; a turn tracker with HP and conditions; private "director" notes to the DM; DM tools usable any time; automatic music moods.
   - **Memory:** the full transcript is sent each turn, and only the oldest part is summarized once it exceeds your budget.
   - **After the session:** the transcript becomes the session's play log.

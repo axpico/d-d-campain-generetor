@@ -5,6 +5,7 @@ import { uid } from '../lib/rng';
 import { ABILITY_NAME, SKILLS, type Ability, type Attack, type Condition, type Creature, type Economy, type GameState, type Msg, type PcSheet, type Side } from './types';
 import { cantripTier, findSpell, type SpellDef } from './spells';
 import { creatureFromMonster, findMonster } from './creatures';
+import { canStand, coordName, creaturesInArea, deploy, findPath, generateBattleMap, sight, type Area } from './map';
 
 // ---------- log ----------
 
@@ -44,8 +45,6 @@ export function distance(a: Creature, b: Creature): number {
   return Math.max(dx, dy) * 5;
 }
 
-const occupied = (g: GameState, x: number, y: number, except?: Creature) =>
-  g.creatures.some((c) => c !== except && !c.dead && x >= c.pos.x && x < c.pos.x + c.size && y >= c.pos.y && y < c.pos.y + c.size);
 
 // ---------- checks and saves ----------
 
@@ -72,12 +71,13 @@ export function abilityCheck(g: GameState, c: Creature, what: string, dc: number
   return { ok, text: `${c.name} — ${skill ?? ABILITY_NAME[ability]} check DC ${dc}: ${r.text} → ${ok ? 'success' : 'failure'}` };
 }
 
-export function savingThrow(g: GameState, c: Creature, ability: Ability, dc: number): { ok: boolean; text: string } {
+export function savingThrow(g: GameState, c: Creature, ability: Ability, dc: number, coverBonus = 0): { ok: boolean; text: string } {
   if ((ability === 'str' || ability === 'dex') && c.conditions.some((x) => ['paralyzed', 'stunned', 'unconscious', 'petrified'].includes(x.name))) {
     return { ok: false, text: `${c.name} — ${ABILITY_NAME[ability]} save DC ${dc}: automatic failure (${c.conditions.map((x) => x.name).join(', ')})` };
   }
   let bonus = c.saves[ability];
   let extra = '';
+  if (ability === 'dex' && coverBonus) { bonus += coverBonus; extra += ` +${coverBonus} cover`; }
   if (has(c, 'blessed')) { const b = roll('1d4').total; bonus += b; extra += ` +${b} bless`; }
   if (has(c, 'baned')) { const b = roll('1d4').total; bonus -= b; extra += ` −${b} bane`; }
   const dis = (ability === 'dex' && has(c, 'restrained'));
@@ -217,11 +217,20 @@ function attackRollMode(g: GameState, att: Creature, tgt: Creature, ranged: bool
   if (has(tgt, 'reckless')) A('target reckless');
   if (has(tgt, 'invisible') && !has(att, 'invisible')) D('target invisible');
   if (has(tgt, 'dodging')) D('target dodging');
-  if (['restrained', 'paralyzed', 'stunned', 'unconscious', 'blinded', 'petrified'].some((x) => has(tgt, x))) A('target helpless');
+  const exposed = ['restrained', 'paralyzed', 'stunned', 'unconscious', 'blinded', 'petrified'].find((x) => has(tgt, x));
+  if (exposed) A(`target ${exposed}`);
   if (has(tgt, 'outlined')) A('faerie fire');
   if (has(tgt, 'guided')) { A('guiding bolt'); removeCondition(tgt, 'guided'); }
   if (has(tgt, 'prone')) (d <= 5 && !ranged ? A('target prone') : D('target prone'));
   if (ranged && longRange) D('long range');
+  if (!ranged && g.rules?.flanking && d <= 5) {
+    // Optional flanking (2024 DMG): an ally of the attacker on the opposite side of the target
+    const tx = tgt.pos.x + (tgt.size - 1) / 2;
+    const ty = tgt.pos.y + (tgt.size - 1) / 2;
+    const flank = g.creatures.some((o) => o !== att && o.side === att.side && !incapacitated(o) && distance(o, tgt) <= 5
+      && Math.sign(o.pos.x - tx) === -Math.sign(att.pos.x - tx) && Math.sign(o.pos.y - ty) === -Math.sign(att.pos.y - ty));
+    if (flank) A('flanking');
+  }
   if (ranged && g.creatures.some((o) => o.side !== att.side && !isDown(o) && !incapacitated(o) && distance(o, att) <= 5)) D('enemy adjacent');
   return { mode: rollMode(adv, dis), reasons };
 }
@@ -236,16 +245,34 @@ export function makeAttack(g: GameState, att: Creature, tgt: Creature, a: Attack
   if (!ranged && d > reach) return `${att.name} can't reach ${tgt.name} with ${a.name} (${d} ft away, reach ${reach} ft). Move closer first.`;
   if (ranged && a.range && d > a.range[1]) return `${tgt.name} is out of range for ${a.name} (${d} ft, max ${a.range[1]} ft).`;
   const longRange = ranged && !!a.range && d > a.range[0];
+  const view = sight(g, att, tgt);
+  if (!view.visible) return `${att.name} has no line of sight to ${tgt.name}.`;
   const { mode, reasons } = attackRollMode(g, att, tgt, ranged, d, longRange);
+  const coverAc = d <= 5 && !ranged ? 0 : view.cover;
+  if (coverAc) reasons.push(`${coverAc === 2 ? 'half' : 'three-quarters'} cover +${coverAc} AC`);
   let bonus = a.hit ?? 0;
   let blessTxt = '';
   if (has(att, 'blessed')) { const b = roll('1d4').total; bonus += b; blessTxt = ` (+${b} bless)`; }
   if (has(att, 'baned')) { const b = roll('1d4').total; bonus -= b; blessTxt += ` (−${b} bane)`; }
   const r = d20(bonus, mode);
   const autoCrit = d <= 5 && ['paralyzed', 'unconscious'].some((x) => has(tgt, x));
-  const hit = !r.fumble && (r.crit || r.total >= tgt.ac);
+  let ac = tgt.ac + coverAc;
+  let hit = !r.fumble && (r.crit || r.total >= ac);
+  let shieldTxt = '';
+  // Shield reaction: cast automatically when +5 AC turns this hit into a miss.
+  if (hit && !r.crit && (g.rules?.autoShield ?? true) && tgt.spell && !tgt.used.reaction && r.total < ac + 5
+    && tgt.spell.known.some((k) => k.toLowerCase() === 'shield') && tgt.spell.slots.some((n, i) => i > 0 && n > 0)) {
+    const lvl = tgt.spell.slots.findIndex((n, i) => i > 0 && n > 0);
+    tgt.spell.slots[lvl]--;
+    tgt.used.reaction = true;
+    tgt.ac += 5;
+    addCondition(tgt, { name: 'shielded', rounds: 1 });
+    ac += 5;
+    hit = false;
+    shieldTxt = ` — ${tgt.name} casts Shield as a reaction (+5 AC, level ${lvl} slot)`;
+  }
   const crit = hit && (r.crit || autoCrit);
-  let text = `${att.name} attacks ${tgt.name} with ${opts.label ?? a.name}: ${r.text}${blessTxt} vs AC ${tgt.ac}${reasons.length ? ` [${reasons.join('; ')}]` : ''} → ${crit ? 'CRITICAL HIT' : hit ? 'hit' : 'miss'}`;
+  let text = `${att.name} attacks ${tgt.name} with ${opts.label ?? a.name}: ${r.text}${blessTxt} vs AC ${ac}${reasons.length ? ` [${reasons.join('; ')}]` : ''} → ${crit ? 'CRITICAL HIT' : hit ? 'hit' : 'miss'}${shieldTxt}`;
   if (has(att, 'hidden')) removeCondition(att, 'hidden');
   if (!hit) return text + '.';
   const parts: [number, string][] = [];
@@ -269,7 +296,7 @@ export function makeAttack(g: GameState, att: Creature, tgt: Creature, a: Attack
 
 // ---------- spells ----------
 
-export function castSpell(g: GameState, caster: Creature, sp: SpellDef, targets: Creature[], slotLevel: number): string {
+export function castSpell(g: GameState, caster: Creature, sp: SpellDef, targets: Creature[], slotLevel: number, point?: { x: number; y: number }): string {
   const sc = caster.spell;
   if (!sc) return `${caster.name} can't cast spells.`;
   const level = Math.max(sp.level, slotLevel || sp.level);
@@ -306,14 +333,29 @@ export function castSpell(g: GameState, caster: Creature, sp: SpellDef, targets:
   const maxT = sp.targets ?? 1;
   let tg = targets.slice(0, Math.max(1, maxT + (sp.name === 'Hold Person' || sp.name === 'Hold Monster' || sp.name === 'Banishment' ? up : 0)));
   if (sp.range === 0 && !sp.area && tg.length === 0) tg = [caster];
-  // range and area checks
+  // range, sight and area
+  const refund = () => { if (sp.level > 0) sc.slots[level]++; if (sp.conc) caster.concentration = undefined; };
   const first = tg[0];
-  if (first && sp.range > 0 && first !== caster && distance(caster, first) > sp.range) {
-    if (sp.level > 0) sc.slots[level]++;
-    if (sp.conc) caster.concentration = undefined;
-    return `${first.name} is out of range for ${sp.name} (${distance(caster, first)} ft, range ${sp.range} ft).`;
+  const aim = point ?? (first ? first.pos : undefined);
+  if (aim && sp.range > 0 && !(first === caster && !point)) {
+    const dAim = distance(caster, { ...caster, pos: aim, size: first && !point ? first.size : 1 });
+    if (dAim > sp.range) { refund(); return `${point ? coordName(point.x, point.y) : first!.name} is out of range for ${sp.name} (${dAim} ft, range ${sp.range} ft).`; }
+    if (g.map && first && !point && first !== caster && !sight(g, caster, first).visible) { refund(); return `${caster.name} has no line of sight to ${first.name}.`; }
   }
-  if (sp.area && tg.length > 1) {
+  let areaCover = new Map<string, number>();
+  if (sp.area && g.map && aim) {
+    const shape = sp.area[0];
+    const fromCaster = sp.range === 0 || shape === 'cone' || shape === 'line' || shape === 'emanation';
+    const area: Area = fromCaster
+      ? { shape, size: sp.area[1], origin: caster.pos, toward: aim }
+      : { shape, size: sp.area[1], origin: aim };
+    let hit = creaturesInArea(g, area, fromCaster ? caster : undefined);
+    if (shape === 'emanation') hit = hit.filter((t) => t.side !== caster.side); // caster chooses who is affected
+    if (sp.buff || sp.kind === 'heal') hit = hit.filter((t) => t.side === caster.side);
+    tg = hit.slice(0, Math.max(maxT, hit.length));
+    lines.push(`Area (${sp.area[1]}-ft ${shape}${point ? ` at ${coordName(point.x, point.y)}` : ''}): ${tg.map((t) => t.name).join(', ') || 'no one'}.`);
+    areaCover = new Map(tg.map((t) => [t.id, g.map ? sight(g, { ...caster, pos: fromCaster ? caster.pos : aim, size: 1 }, t).cover : 0]));
+  } else if (sp.area && tg.length > 1) {
     const center = sp.range === 0 ? caster : first;
     const size = sp.area[1];
     const inArea = tg.filter((t) => t === center || distance(center, t) <= size);
@@ -345,7 +387,7 @@ export function castSpell(g: GameState, caster: Creature, sp: SpellDef, targets:
       const rolled = dmgDice.map(([dice, type]) => [rollDamage(dice).total, type] as [number, string]);
       if (rolled.length) lines.push(`Damage roll: ${rolled.map(([n, t]) => `${n} ${t}`).join(' + ')}.`);
       for (const t of tg) {
-        const s = savingThrow(g, t, sp.save!, sc.dc);
+        const s = savingThrow(g, t, sp.save!, sc.dc, areaCover.get(t.id) ?? 0);
         let line = s.text;
         if (rolled.length) {
           if (!s.ok) line += '. ' + applyDamage(g, t, rolled);
@@ -405,50 +447,73 @@ export function castSpell(g: GameState, caster: Creature, sp: SpellDef, targets:
 
 // ---------- movement ----------
 
-/** Move up to `ft` toward (or away from) a target. Leaving an enemy's reach provokes opportunity attacks. */
-export function move(g: GameState, c: Creature, target: Creature | undefined, ft: number, away = false): string {
-  if (has(c, 'grappled') || has(c, 'restrained')) return `${c.name} can't move (${has(c, 'grappled') ? 'grappled' : 'restrained'}).`;
-  let steps = Math.floor(ft / 5);
-  if (has(c, 'prone')) { removeCondition(c, 'prone'); steps = Math.max(0, steps - Math.ceil(c.speed / 10)); }
-  if (!target || steps <= 0) return `${c.name} stays put.`;
-  if (!away && distance(c, target) <= 5) return `${c.name} is already next to ${target.name}.`;
-  const start = { ...c.pos };
-  const threatenedBefore = g.creatures.filter((o) => o.side !== c.side && !incapacitated(o) && distance(o, c) <= reachOf(o));
-  let moved = 0;
-  const sq = (x: number, y: number) => Math.max(Math.abs(x - target.pos.x), Math.abs(y - target.pos.y));
-  for (let i = 0; i < steps; i++) {
-    if (!away && distance(c, target) <= 5) break;
-    const here = sq(c.pos.x, c.pos.y);
-    let best: { x: number; y: number } | undefined;
-    let bestScore = here;
-    for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) {
-      if (!dx && !dy) continue;
-      const nx = c.pos.x + dx;
-      const ny = c.pos.y + dy;
-      if (occupied(g, nx, ny, c)) continue;
-      const score = sq(nx, ny);
-      if (away ? score > bestScore : score < bestScore) { bestScore = score; best = { x: nx, y: ny }; }
-    }
-    if (!best) break;
-    c.pos = best;
-    moved += 5;
-  }
-  const d2 = distance(c, target);
-  let text = `${c.name} moves ${moved} ft ${away ? 'away from' : 'toward'} ${target.name} (now ${d2} ft away).`;
-  if (!has(c, 'disengaged')) {
-    for (const o of threatenedBefore) {
-      if (distance(o, c) > reachOf(o) && !o.used.reaction && !isDown(c)) {
-        const a = bestMelee(o);
-        if (!a) continue;
-        o.used.reaction = true;
-        const saved = { ...c.pos };
-        c.pos = start; // the attack happens as the target leaves reach
-        text += `\nOpportunity attack! ${makeAttack(g, o, c, a)}`;
-        c.pos = saved;
+export interface MoveResult { text: string; used: number }
+
+/**
+ * Move along the cheapest path (walls block, difficult terrain costs double, allies can be passed through).
+ * Leaving an enemy's reach without Disengage provokes an opportunity attack at that step.
+ */
+export function moveAlong(g: GameState, c: Creature, dest: (x: number, y: number) => boolean, budget: number, label: string): MoveResult {
+  if (has(c, 'grappled') || has(c, 'restrained')) return { text: `${c.name} can't move (${has(c, 'grappled') ? 'grappled' : 'restrained'}).`, used: 0 };
+  let extra = 0;
+  if (has(c, 'prone')) { removeCondition(c, 'prone'); extra = Math.ceil(c.speed / 2); }
+  const avail = budget - extra;
+  if (avail < 5) return { text: extra ? `${c.name} stands up (half their movement).` : `${c.name} has no movement left.`, used: extra };
+  const path = findPath(g, c, dest, avail + 60);
+  if (!path) return { text: `${c.name} can't find a way ${label}.`, used: extra };
+  let used = 0;
+  const lines: string[] = [];
+  for (const cell of path.cells) {
+    const cost = (g.map && [2, 4].includes(g.map.cells[cell.y * g.map.w + cell.x])) ? 10 : 5;
+    if (used + cost > avail) break;
+    if (!canStand(g, c, cell.x, cell.y) && cell === path.cells[path.cells.length - 1]) break;
+    const threatened = g.creatures.filter((o) => o.side !== c.side && !(o.side === 'ally' && c.side === 'party') && !(o.side === 'party' && c.side === 'ally') && !incapacitated(o) && !o.used.reaction && distance(o, c) <= reachOf(o));
+    const prev = { ...c.pos };
+    c.pos = { x: cell.x, y: cell.y };
+    used += cost;
+    if (!has(c, 'disengaged')) {
+      for (const o of threatened) {
+        if (distance(o, c) > reachOf(o) && !isDown(c)) {
+          const a = bestMelee(o);
+          if (!a) continue;
+          o.used.reaction = true;
+          const now = { ...c.pos };
+          c.pos = prev;
+          lines.push(`Opportunity attack! ${makeAttack(g, o, c, a)}`);
+          c.pos = now;
+          if (isDown(c)) break;
+        }
       }
     }
+    if (isDown(c)) break;
   }
-  return text;
+  const partial = used < path.cost ? ' (as far as their movement allows)' : '';
+  lines.unshift(`${c.name} moves ${used + extra} ft ${label} to ${coordName(c.pos.x, c.pos.y)}${partial}${extra ? ', after standing up' : ''}.`);
+  return { text: lines.join('\n'), used: used + extra };
+}
+
+/** Move up to `ft` toward (or away from) a target. */
+export function move(g: GameState, c: Creature, target: Creature | undefined, ft: number, away = false): MoveResult {
+  if (!target) return { text: `${c.name} stays put.`, used: 0 };
+  if (!away && distance(c, target) <= 5) return { text: `${c.name} is already next to ${target.name}.`, used: 0 };
+  if (!away) {
+    const r = moveAlong(g, c, (x, y) => distance({ ...c, pos: { x, y } }, target) <= 5, ft, `toward ${target.name}`);
+    return withDistance(r, c, target);
+  }
+  // away: head for the farthest reachable square
+  const here = distance(c, target);
+  const r = moveAlong(g, c, (x, y) => distance({ ...c, pos: { x, y } }, target) >= Math.min(here + ft, here + 30), ft, `away from ${target.name}`);
+  return withDistance(r, c, target);
+}
+
+function withDistance(r: MoveResult, c: Creature, target: Creature): MoveResult {
+  const [first, ...rest] = r.text.split('\n');
+  return { ...r, text: [`${first.replace(/\.$/, '')} (${distance(c, target)} ft from ${target.name}).`, ...rest].join('\n') };
+}
+
+export function moveTo(g: GameState, c: Creature, x: number, y: number, ft: number): MoveResult {
+  if (c.pos.x === x && c.pos.y === y) return { text: `${c.name} is already at ${coordName(x, y)}.`, used: 0 };
+  return moveAlong(g, c, (px, py) => px === x && py === y, ft, `toward ${coordName(x, y)}`);
 }
 
 const reachOf = (c: Creature) => Math.max(5, ...c.attacks.filter((a) => a.reach).map((a) => a.reach!));
@@ -480,12 +545,10 @@ export function startCombat(g: GameState, spec: string): string {
   };
   spawn(enemySpec ?? '', 'enemy');
   if (allySpec) spawn(allySpec, 'ally');
-  // Formation: party on the left, enemies ~30 ft away on the right.
-  const party = g.creatures.filter((c) => c.side !== 'enemy' && !c.dead);
-  const foes = g.creatures.filter((c) => c.side === 'enemy' && !c.dead);
-  party.forEach((c, i) => { c.pos = { x: 2 + (i % 2), y: 2 + Math.floor(i / 2) * 2 + (i % 2) }; });
-  let y = 1;
-  foes.forEach((c, i) => { c.pos = { x: 9 + (i % 3) * 2, y }; y += c.size + (i % 3 === 2 ? 0 : 0); if (i % 3 === 2) y += 1; });
+  // Battle map from the current scene, party on the left, foes on the right.
+  g.map = generateBattleMap(`${g.id}:${g.log.length}`, g.sceneTheme ?? 'open', 'Battlefield');
+  deploy(g);
+  lines.push(`Battle map: ${g.map.theme}, ${g.map.w * 5}×${g.map.h * 5} ft.`);
   const init = g.creatures.filter((c) => !c.dead).map((c) => {
     const r = d20(c.initMod);
     return { c, total: r.total, text: `${c.name} ${r.text}` };
@@ -581,6 +644,7 @@ export function advanceTurn(g: GameState): string {
 export function endCombat(g: GameState, winner: 'party' | 'enemy'): string {
   const fallen = g.creatures.filter((c) => c.side === 'enemy' && c.dead).map((c) => c.name);
   g.combat = undefined;
+  g.map = undefined;
   g.creatures = g.creatures.filter((c) => c.kind === 'pc' || (!c.dead && c.side === 'ally'));
   g.creatures.forEach((c) => {
     c.conditions = c.conditions.filter((x) => !['dodging', 'disengaged', 'hidden', 'reckless', 'raging', 'marked', 'blessed', 'baned', 'outlined', 'guided', 'shielded', 'helped'].includes(x.name));
