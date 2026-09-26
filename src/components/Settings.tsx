@@ -58,6 +58,18 @@ export function Settings({ llm, img, onLlm, onImg }: {
             <span>Creativity (temperature): {llm.temperature.toFixed(1)}</span>
             <input type="range" min={0} max={1.5} step={0.1} value={llm.temperature} onChange={(e) => onLlm({ ...llm, temperature: +e.target.value })} />
           </label>
+          {llm.provider === 'openrouter' && (
+            <label className="field">
+              <span>Reasoning (thinking models)</span>
+              <select value={llm.reasoning ?? 'low'} onChange={(e) => onLlm({ ...llm, reasoning: e.target.value as LlmSettings['reasoning'] })}>
+                <option value="off">Off: fastest (if the model allows it)</option>
+                <option value="low">Low (recommended)</option>
+                <option value="medium">Medium</option>
+                <option value="high">High: slow, may run out of tokens</option>
+                <option value="default">Model default</option>
+              </select>
+            </label>
+          )}
         </div>
         {lp.note && <p className="note">ℹ {lp.note}</p>}
         {httpsLocal(llm.baseUrl) && <p className="note warn">⚠ This page is on HTTPS and the provider is a local http:// address. Most browsers block that. Run the app locally with <code>npm run dev</code> to use local models.</p>}

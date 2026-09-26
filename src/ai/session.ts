@@ -59,7 +59,7 @@ ${npcIds.map((id) => `@@${al.toAlias.get(id)} — 2-3 lines of sample dialogue f
   const text = await chat(s, [
     { role: 'system', content: `${SYSTEM}\n\n${FORMAT}` },
     { role: 'user', content: `Campaign skeleton:\n${JSON.stringify(skeleton(c, al))}\n\n${task}\n\nRemember: "@@KEY" blocks only, no JSON.` },
-  ], { maxTokens: 5000, signal: cb.signal, onDelta: cb.onDelta });
+  ], { maxTokens: 10000, signal: cb.signal, onDelta: cb.onDelta });
 
   const raw = parseBlocks(text);
   const b: Record<string, string> = {};
