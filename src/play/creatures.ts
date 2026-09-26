@@ -67,10 +67,14 @@ function parseSpellcasting(m: SrdMonster): Creature['spell'] {
 }
 
 export function creatureFromMonster(m: SrdMonster, side: Side = 'enemy', label?: string): Creature {
-  const attacks: Attack[] = m.actions.map((a) => ({
-    name: a.n, hit: a.hit, dmg: a.dmg, reach: a.reach ?? (a.hit !== undefined && !a.range ? 5 : undefined), range: a.range,
+  const attacks: Attack[] = m.actions.map((a) => {
+    // Save-based abilities (breath weapons…) carry attack_bonus 0 in the source data: they are not attack rolls.
+    const isAttack = a.hit !== undefined && /to hit/i.test(a.t);
+    return {
+    name: a.n, hit: isAttack ? a.hit : undefined, dmg: a.dmg, reach: a.reach ?? (isAttack && !a.range ? 5 : undefined), range: a.range,
     dc: a.dc, save: a.save, half: !!a.half, area: a.area, cond: a.cond, recharge: a.recharge, text: a.t,
-  }));
+  };
+  });
   const saves = Object.fromEntries(ABILITIES.map((ab) => [ab, m.saves?.[ab] ?? mod(m.ab[ab])])) as Record<Ability, number>;
   return {
     id: uid(), name: label ?? m.name, side, kind: 'monster', monster: m.name,

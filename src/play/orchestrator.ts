@@ -1,6 +1,7 @@
 // Runs the table one step at a time: a DM turn, one player's turn, or one combat turn.
 // Human seats pause the loop until they submit; AI seats call their own model.
 import type { Campaign, Mood, Session } from '../lib/types';
+import type { BattleMap } from './map';
 import { chat, type LlmSettings } from '../ai/llm';
 import { uid } from '../lib/rng';
 import type { Creature, GameState, PcSheet, Seat } from './types';
@@ -20,16 +21,28 @@ export interface Env {
 
 const MOODS: Mood[] = ['tavern', 'town', 'travel', 'forest', 'dungeon', 'battle', 'boss', 'horror', 'mystery', 'sea', 'sacred', 'calm'];
 
-export async function newGame(c: Campaign, s: Session, seats: Seat[], sheets: PcSheet[], contextChars = 60000): Promise<GameState> {
+export async function newGame(c: Campaign, s: Session, seats: Seat[], sheets: PcSheet[], contextChars = 60000, rules = { flanking: false, autoShield: true }): Promise<GameState> {
   await loadSrd();
   const g: GameState = {
     id: uid(), campaignId: c.id, sessionId: s.id, createdAt: Date.now(), updatedAt: Date.now(),
     seats, sheets: structuredClone(sheets), creatures: sheets.map(creatureFromSheet),
     phase: 'dm', playerQueue: [], log: [], summarizedCount: 0, sceneIndex: 0, status: 'running',
-    directorNotes: [], contextChars, mood: s.scenes[0]?.mood,
+    directorNotes: [], contextChars, mood: s.scenes[0]?.mood, sceneTheme: themeFor(c, s, 0), rules,
   };
   log(g, 'system', `Session ${s.number}: ${s.title} begins. Party: ${sheets.map((x) => `${x.name} (${x.species} ${x.cls} ${x.level})`).join(', ')}.`);
   return g;
+}
+
+/** Battle-map theme from the scene's location. */
+export function themeFor(c: Campaign, s: Session, sceneIndex: number): BattleMap['theme'] {
+  const sc = s.scenes[Math.min(sceneIndex, s.scenes.length - 1)];
+  const loc = c.locations.find((l) => l.id === sc?.locationId);
+  if (!loc) return 'open';
+  if (loc.kind === 'dungeon') return /cave|mine/i.test(loc.dungeon?.theme ?? '') ? 'cave' : 'dungeon';
+  if (['town', 'city', 'village', 'fortress'].includes(loc.kind)) return 'town';
+  if (loc.terrain === 'forest' || loc.terrain === 'swamp') return 'forest';
+  if (loc.terrain === 'underdark' || loc.terrain === 'mountains') return 'cave';
+  return 'open';
 }
 
 export const dmSeat = (g: GameState) => g.seats.find((s) => s.role === 'dm')!;
@@ -56,6 +69,7 @@ function handleDm(g: GameState, text: string, env: Env) {
   if (fx.scene) {
     g.sceneIndex = fx.scene === 'next' ? Math.min(env.session.scenes.length, g.sceneIndex + 1) : Math.max(0, Math.min(env.session.scenes.length, fx.scene - 1));
     const sc = env.session.scenes[g.sceneIndex];
+    g.sceneTheme = themeFor(env.campaign, env.session, g.sceneIndex);
     if (sc) { log(g, 'system', `Scene ${g.sceneIndex + 1}: ${sc.title}`, { dmOnly: true }); if (!fx.mood) setMood(g, env, sc.mood); }
   }
   setMood(g, env, fx.mood);

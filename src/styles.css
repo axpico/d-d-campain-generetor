@@ -416,6 +416,35 @@ details .image-slot.wide, .tab-panel > .card > .image-slot.wide { width: 100%; m
   .chat { height: 55vh; }
 }
 
+/* ---------- Battle map ---------- */
+.battlemap-card { margin: 0; padding: 10px; }
+.battlemap { width: 100%; height: auto; display: block; user-select: none; }
+.bm-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.bm-toolbar select { width: auto; padding: 4px 8px; }
+.bm-label { font-size: 9px; fill: var(--muted); font-family: var(--sans); }
+.bm-cell { stroke: #9aa6b2; stroke-width: 0.5; }
+.bm-floor { fill: #eef0ec; }
+.bm-wall { fill: #3a4450; stroke: #2b333c; }
+.bm-water { fill: #9cc3dc; }
+.bm-difficult { fill: #e2dccb; }
+.bm-reach { fill: #d9ecc8; }
+.bm-water.bm-reach { fill: #a6d6c6; }
+.bm-difficult.bm-reach { fill: #d3e3b8; }
+.bm-obstacle { fill: #8a6a4a; stroke: #5b4430; stroke-width: 1.5; }
+.bm-rubble { stroke: #8a7a5a; stroke-width: 1.2; fill: none; }
+.bm-token-body { stroke: #1d2730; stroke-width: 1.5; }
+.side-party .bm-token-body { fill: #4f8a5b; }
+.side-enemy .bm-token-body { fill: #b24a3e; }
+.side-ally .bm-token-body { fill: #4a6fb2; }
+.bm-token.down .bm-token-body { fill: #8a8a8a; }
+.bm-hp { fill: none; stroke: #f2d24b; stroke-width: 2.5; }
+.bm-initials { fill: #fff; font-weight: 700; font-family: var(--sans); pointer-events: none; }
+.bm-glow { fill: none; stroke: var(--gold); stroke-width: 3; stroke-dasharray: 4 3; }
+.bm-cond { fill: #7a3fb0; stroke: #fff; stroke-width: 1; }
+.bm-legend { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.lg { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; }
+.lg-wall { background: #3a4450; } .lg-obstacle { background: #8a6a4a; border-radius: 50%; } .lg-difficult { background: #e2dccb; border: 1px solid #8a7a5a; } .lg-water { background: #9cc3dc; }
+
 /* ---------- Print ---------- */
 @media print {
   :root { --bg: #fff; --card: #fff; --ink: #000; --muted: #444; --line: #bbb; --shadow: none; color-scheme: light; }

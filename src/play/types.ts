@@ -2,6 +2,7 @@
 // The code owns the rules and the dice; language models only choose what to do and describe it.
 import type { LlmProviderId } from '../ai/llm';
 import type { Mood } from '../lib/types';
+import type { BattleMap } from './map';
 
 export type Ability = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
 export const ABILITIES: Ability[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
@@ -168,4 +169,7 @@ export interface GameState {
   waitingFor?: string; // seat id of a human who must act
   directorNotes: string[]; // private nudges to the DM, consumed on its next turn
   contextChars: number; // transcript budget before summarizing the oldest part
+  map?: BattleMap; // tactical map during combat
+  rules?: { flanking: boolean; autoShield: boolean };
+  sceneTheme?: BattleMap['theme'];
 }
