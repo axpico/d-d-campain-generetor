@@ -4,7 +4,7 @@ import { ART_STYLES, TONES } from '../data/story';
 import {
   addNpc, rerollAct, rerollDungeon, rerollEncounter, rerollFaction, rerollLocation, rerollNpc, rerollTown, rerollVillain,
 } from '../gen/campaign';
-import { expandAll, expandOne, expandSection, type EntityKind } from '../ai/expand';
+import { expandAll, expandOne, expandSection, mergeAi, type EntityKind } from '../ai/expand';
 import { factionPrompt, locationMapPrompt, locationPrompt, npcPrompt, regionMapPrompt, villainPrompt } from '../ai/image';
 import { campaignToMarkdown, download, slug } from '../lib/markdown';
 import { RegionMap, REGION_LEGEND } from '../maps/RegionMap';
@@ -48,9 +48,9 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
   async function doExpandAll() {
     let failed: string[] = [];
     const ok = await runAi('Expanding the whole campaign', async (cb) => {
-      const r = await expandAll(llm, latest.current, { ...cb, onUpdate: (x) => onChange({ ...x, aiExpanded: true, updatedAt: Date.now() }) });
+      const r = await expandAll(llm, latest.current, { ...cb, onUpdate: (x) => onChange(mergeAi(latest.current, { ...x, aiExpanded: true })) });
       failed = r.failed;
-      onChange({ ...r.campaign, updatedAt: Date.now() });
+      onChange(mergeAi(latest.current, r.campaign));
     });
     if (!ok) return;
     if (failed.length) toast(`AI expansion finished, but ${failed.length} item(s) got no text: ${failed.slice(0, 6).join(', ')}${failed.length > 6 ? '…' : ''}. Use ✨ on them to retry.`, 'error');
@@ -101,7 +101,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
         </div>
         <div className="toolbar no-print">
           <button className="btn primary" onClick={onSave} disabled={saved}>{saved ? '✓ Saved' : '💾 Save'}</button>
-          <button className="btn" onClick={doExpandAll} disabled={aiOff || aiBusy} title={aiOff ? 'Configure an AI provider in Settings' : 'Rewrite everything as connected prose'}>✨ Expand all with AI</button>
+          <button className="btn" onClick={doExpandAll} disabled={aiOff || aiBusy} title={aiOff ? 'Configure an AI provider in Settings' : 'Write everything with AI: pitch, villain, factions, NPCs, locations, acts and every unplayed session'}>✨ Expand all with AI</button>
           <button className="btn" onClick={exportMd}>⬇ Markdown</button>
           <label className="check small" title="Embed generated images as data inside the .md (bigger file, works offline)">
             <input type="checkbox" checked={embed} onChange={(e) => setEmbed(e.target.checked)} /> embed images
@@ -128,7 +128,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
         <h2 className="print-only">Overview</h2>
         <div className="card">
           <div className="card-head"><h3>Pitch</h3><AiButton disabled={aiOff || aiBusy} onClick={async () => {
-            await runAi('Writing pitch and villain', async (cb) => { const r = await expandSection(llm, latest.current, 'overview', cb); onChange({ ...r.campaign, updatedAt: Date.now() }); });
+            await runAi('Writing pitch and villain', async (cb) => { const r = await expandSection(llm, latest.current, 'overview', cb); onChange(mergeAi(latest.current, r.campaign)); });
           }} /></div>
           <Editable value={c.pitch} onSave={(v) => patch((x) => ({ ...x, pitch: v }))} />
           <div className="muted small">Themes: {c.themes.join(' · ')}</div>

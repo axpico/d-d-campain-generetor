@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Campaign, Scene, SceneKind, Session } from '../lib/types';
 import { deleteSession, insertSession, MOOD_LABEL, rerollSession } from '../gen/session';
 import { writeSession } from '../ai/session';
@@ -16,6 +16,9 @@ export function SessionsView({ c, onChange, goLoc, onPlay }: { c: Campaign; onCh
   const [sel, setSel] = useState<string | undefined>(firstOpen?.id);
   useEffect(() => { if (!c.sessions.some((s) => s.id === sel)) setSel(firstOpen?.id); }, [c.sessions, sel, firstOpen]);
   const s = c.sessions.find((x) => x.id === sel);
+  // The newest campaign, so an AI result that arrives later never overwrites edits made meanwhile.
+  const latest = useRef(c);
+  latest.current = c;
 
   const setSession = (id: string, p: Partial<Session> | ((s: Session) => Partial<Session>)) =>
     onChange({ ...c, updatedAt: Date.now(), sessions: c.sessions.map((x) => (x.id === id ? { ...x, ...(typeof p === 'function' ? p(x) : p) } : x)) });
@@ -27,7 +30,8 @@ export function SessionsView({ c, onChange, goLoc, onPlay }: { c: Campaign; onCh
     });
     if (ok && result) {
       const r = result;
-      onChange({ ...base, updatedAt: Date.now(), sessions: base.sessions.map((x) => (x.id === r.id ? r : x)) });
+      const now = latest.current;
+      onChange({ ...now, updatedAt: Date.now(), sessions: now.sessions.map((x) => (x.id === r.id ? r : x)) });
       setSel(r.id);
       if (r.adapted) toast(`Session ${r.number} adapted to your play log.`, 'info');
     }

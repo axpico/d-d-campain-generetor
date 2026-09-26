@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Campaign, CampaignOptions, Mood } from './lib/types';
 import { generateCampaign, migrate } from './gen/campaign';
-import { expandAll, type ExpandCallbacks } from './ai/expand';
+import { expandAll, mergeAi, type ExpandCallbacks } from './ai/expand';
 import { loadLlm, saveLlm, type LlmSettings } from './ai/llm';
 import { loadImageSettings, saveImageSettings, type ImageSettings } from './ai/image';
 import { campaignsDb, loadSetting, saveSetting } from './lib/storage';
@@ -96,9 +96,9 @@ export default function App() {
     if (expand) {
       let failed: string[] = [];
       const ok = await runAi('Expanding the new campaign', async (cb) => {
-        const r = await expandAll(llm, c, { ...cb, onUpdate: (x) => setCampaign({ ...x, aiExpanded: true }) });
+        const r = await expandAll(llm, c, { ...cb, onUpdate: (x) => setCampaign((prev) => (prev && prev.id === x.id ? mergeAi(prev, { ...x, aiExpanded: true }) : prev)) });
         failed = r.failed;
-        setCampaign(r.campaign);
+        setCampaign((prev) => (prev && prev.id === r.campaign.id ? mergeAi(prev, r.campaign) : prev));
       });
       if (ok && failed.length) toast(`Done. ${failed.length} item(s) got no AI text (${failed.slice(0, 5).join(', ')}…). Use ✨ on them to retry.`, 'error');
     }
