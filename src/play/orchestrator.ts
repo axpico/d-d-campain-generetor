@@ -21,7 +21,7 @@ export interface Env {
 
 const MOODS: Mood[] = ['tavern', 'town', 'travel', 'forest', 'dungeon', 'battle', 'boss', 'horror', 'mystery', 'sea', 'sacred', 'calm'];
 
-export async function newGame(c: Campaign, s: Session, seats: Seat[], sheets: PcSheet[], contextChars = 60000, rules: NonNullable<GameState['rules']> = { flanking: false, autoShield: true, images: 'off' }): Promise<GameState> {
+export async function newGame(c: Campaign, s: Session, seats: Seat[], sheets: PcSheet[], contextChars = 60000, rules: NonNullable<GameState['rules']> = { flanking: false, autoShield: true, images: 'off', flow: 'free' }): Promise<GameState> {
   await loadSrd();
   const g: GameState = {
     id: uid(), campaignId: c.id, sessionId: s.id, createdAt: Date.now(), updatedAt: Date.now(),
@@ -52,9 +52,49 @@ const seatFor = (g: GameState, c: Creature) => (c.kind === 'pc' ? g.seats.find((
 const sheetFor = (g: GameState, seat: Seat) => g.sheets.find((x) => x.id === seat.sheetId);
 const creatureFor = (g: GameState, seat: Seat) => g.creatures.find((c) => c.sheetId === seat.sheetId);
 
-function queuePlayers(g: GameState) {
-  g.playerQueue = g.seats.filter((s) => s.role === 'player' && creatureFor(g, s) && !isDown(creatureFor(g, s)!)).map((s) => s.id);
+const aliveSeats = (g: GameState) => g.seats.filter((s) => s.role === 'player' && creatureFor(g, s) && !isDown(creatureFor(g, s)!));
+const firstName = (n: string) => n.split(/\s+/)[0].toLowerCase();
+const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Does `text` address a character by full or first name? */
+const mentions = (text: string, name: string) => new RegExp(`\\b(${escapeRe(name)}|${escapeRe(firstName(name))})\\b`, 'i').test(text);
+
+/**
+ * Who reacts after the DM speaks. Round-robin: everyone, in seat order.
+ * Free flow (default): characters the DM addressed by name first, then the rest in random order;
+ * each may PASS, and characters addressed by another player get a chance to reply.
+ */
+function queuePlayers(g: GameState, dmText = '') {
+  const seats = aliveSeats(g);
+  g.roundSpoken = {};
+  g.roundActs = 0;
+  if ((g.rules?.flow ?? 'free') === 'round') {
+    g.playerQueue = seats.map((s) => s.id);
+  } else {
+    const named = seats.filter((s) => mentions(dmText, sheetFor(g, s)!.name));
+    const rest = seats.filter((s) => !named.includes(s)).sort(() => Math.random() - 0.5);
+    g.playerQueue = [...named, ...rest].map((s) => s.id);
+  }
   g.phase = g.playerQueue.length ? 'players' : 'dm';
+}
+
+/** After a player's turn in the players phase: react-queue, round bookkeeping, back to the DM when done. */
+function afterPlayer(g: GameState, seat: Seat, acted: boolean, said: string) {
+  g.playerQueue.shift();
+  if (acted) {
+    g.roundActs = (g.roundActs ?? 0) + 1;
+    g.roundSpoken = { ...(g.roundSpoken ?? {}), [seat.id]: (g.roundSpoken?.[seat.id] ?? 0) + 1 };
+    if ((g.rules?.flow ?? 'free') === 'free') {
+      // Characters addressed by name get to answer (max twice per round each).
+      for (const other of aliveSeats(g)) {
+        if (other.id === seat.id || g.playerQueue.includes(other.id) || (g.roundSpoken?.[other.id] ?? 0) >= 2) continue;
+        if (mentions(said, sheetFor(g, other)!.name)) g.playerQueue.unshift(other.id);
+      }
+    }
+  }
+  if (!g.playerQueue.length) {
+    g.quietRounds = (g.roundActs ?? 0) === 0 ? (g.quietRounds ?? 0) + 1 : 0;
+    g.phase = 'dm';
+  }
 }
 
 function requestImage(g: GameState, kind: 'tag' | 'scene', prompt: string, caption: string) {
@@ -106,12 +146,17 @@ function handleDm(g: GameState, text: string, env: Env) {
     if (!fx.mood) setMood(g, env, g.creatures.some((c) => c.legendary || (c.side === 'enemy' && c.maxHp > 100)) ? 'boss' : 'battle');
     return;
   }
-  queuePlayers(g);
+  queuePlayers(g, narration);
 }
 
-function handlePlayerExplore(g: GameState, seat: Seat, text: string) {
+/** Log a player's exploration reply. Returns whether they actually did/said something (PASS = no). */
+function handlePlayerExplore(g: GameState, seat: Seat, text: string): { acted: boolean; said: string } {
   const sh = sheetFor(g, seat)!;
   let any = false;
+  if (/^[\s"'*_.-]*(PASS|\(?pass(es)?\)?|\.\.\.)[\s"'*_.!-]*$/i.test(text.trim()) || !text.trim()) {
+    if ((g.rules?.flow ?? 'free') === 'round') log(g, 'action', 'waits and watches.', { speaker: sh.name, side: 'party' });
+    return { acted: false, said: '' };
+  }
   for (const raw of text.split('\n')) {
     const l = raw.replace(/^[\s>*\-•]+/, '').replace(/\*\*/g, '').trim();
     if (!l) continue;
@@ -122,6 +167,7 @@ function handlePlayerExplore(g: GameState, seat: Seat, text: string) {
     else if (!/^(END|PASS)$/i.test(l)) { log(g, 'dialogue', l, { speaker: sh.name, side: 'party' }); any = true; }
   }
   if (!any) log(g, 'action', 'waits and watches.', { speaker: sh.name, side: 'party' });
+  return { acted: any, said: text };
 }
 
 async function finishTurn(g: GameState, env: Env, actor: Creature) {
@@ -187,16 +233,15 @@ export async function step(g0: GameState, env: Env): Promise<GameState> {
     const seat = g.seats.find((s) => s.id === seatId);
     if (!seat) { g.playerQueue.shift(); if (!g.playerQueue.length) g.phase = 'dm'; return touch(g); }
     const me = creatureFor(g, seat);
-    if (!me || isDown(me)) { g.playerQueue.shift(); if (!g.playerQueue.length) g.phase = 'dm'; return touch(g); }
+    if (!me || isDown(me)) { afterPlayer(g, seat, false, ''); return touch(g); }
     if (seat.controller === 'human') { g.waitingFor = seat.id; return g; }
     const sh = sheetFor(g, seat)!;
     const text = await chat(seatLlm(seat, env.llm), [
       { role: 'system', content: playerSystem(g, sh) },
       { role: 'user', content: playerExploreUser(g, sh) },
     ], { maxTokens: 1500, signal: env.signal, onDelta: (ch) => env.onDelta?.(sh.name, ch) });
-    handlePlayerExplore(g, seat, text);
-    g.playerQueue.shift();
-    if (!g.playerQueue.length) g.phase = 'dm';
+    const r = handlePlayerExplore(g, seat, text);
+    afterPlayer(g, seat, r.acted, r.said);
   } else if (g.phase === 'combat' && g.combat) {
     const c = currentCreature(g);
     if (!c) { g.phase = 'dm'; return touch(g); }
@@ -238,9 +283,8 @@ export async function submitHuman(g0: GameState, text: string, env: Env): Promis
   if (g.phase === 'dm' && seat.role === 'dm') {
     handleDm(g, text, env);
   } else if (g.phase === 'players' && seat.role === 'player') {
-    handlePlayerExplore(g, seat, text);
-    g.playerQueue.shift();
-    if (!g.playerQueue.length) g.phase = 'dm';
+    const r = handlePlayerExplore(g, seat, text);
+    afterPlayer(g, seat, r.acted, r.said);
   } else if (g.phase === 'combat') {
     const c = currentCreature(g);
     if (c) await combatTurn(g, c, text, env, seat.role === 'dm');
