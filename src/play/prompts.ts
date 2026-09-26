@@ -118,6 +118,8 @@ const DM_TAGS = `GAME-ENGINE TAGS (the engine rolls all dice and applies all res
 [COMBAT <Monster> xN, <Monster>; ally <Monster>]   starts combat with SRD monsters, e.g. [COMBAT Goblin x4, Bugbear]
 [MOOD <tavern|town|travel|forest|dungeon|battle|boss|horror|mystery|sea|sacred|calm>]   [SCENE next]   [REST short|long]   [END] (session over)`;
 
+const IMAGE_TAG = `\n[IMAGE <what to show>]   an illustration for a dramatic reveal (a new NPC, a monster, a breathtaking place). At most once or twice per scene; describe visuals only, e.g. [IMAGE a towering bone gate carved with screaming faces, green torchlight]`;
+
 export function dmSystem(c: Campaign, s: Session, g: GameState): string {
   const scene = s.scenes[g.sceneIndex];
   const npcIds = [...new Set(s.scenes.flatMap((x) => x.npcIds))];
@@ -150,7 +152,7 @@ HOW YOU RUN THE GAME:
 - Reveal secrets and clues naturally when players investigate or talk to the right people.
 - When the last scene is resolved, wrap up the session with a short cliffhanger and add [END].
 
-${DM_TAGS}`;
+${DM_TAGS}${g.rules?.images === 'tags' || g.rules?.images === 'both' ? IMAGE_TAG : ''}`;
 }
 
 export function dmExploreUser(g: GameState): string {

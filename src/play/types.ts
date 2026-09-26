@@ -170,6 +170,8 @@ export interface GameState {
   directorNotes: string[]; // private nudges to the DM, consumed on its next turn
   contextChars: number; // transcript budget before summarizing the oldest part
   map?: BattleMap; // tactical map during combat
-  rules?: { flanking: boolean; autoShield: boolean };
+  rules?: { flanking: boolean; autoShield: boolean; images?: 'off' | 'tags' | 'scenes' | 'both' };
+  imageRequests?: { id: string; prompt: string; afterMsgId?: string; caption: string }[];
+  images?: { id: string; afterMsgId?: string; imageId: string; caption: string }[];
   sceneTheme?: BattleMap['theme'];
 }

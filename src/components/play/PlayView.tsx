@@ -6,6 +6,10 @@ import { addDirectorNote, dmIntervene, dmSeat, newGame, step, submitHuman, write
 import { currentCreature } from '../../play/engine';
 import { LLM_PROVIDERS, type LlmProviderId } from '../../ai/llm';
 import { gamesDb } from '../../lib/storage';
+import { voice } from '../../lib/voice';
+import { generateImage } from '../../ai/image';
+import { ART_STYLES } from '../../data/story';
+import { useImageUrl } from '../ImageSlot';
 import { useApp } from '../context';
 import { SheetEditor } from './SheetEditor';
 import { HumanInput } from './HumanInput';
@@ -68,6 +72,7 @@ function PlaySetup({ c, onChange, session, sessions, onSession, onStart }: {
   const [budget, setBudget] = useState(60000);
   const [flanking, setFlanking] = useState(false);
   const [autoShield, setAutoShield] = useState(true);
+  const [images, setImages] = useState<'off' | 'tags' | 'scenes' | 'both'>('off');
   const aiNeeded = dm.controller === 'ai' || sheets.some((sh) => seatOf(sh).controller === 'ai');
 
   return (
@@ -120,12 +125,20 @@ function PlaySetup({ c, onChange, session, sessions, onSession, onStart }: {
         <p className="muted small">The full transcript is sent every turn. Only if it grows past this size are the oldest events summarized, so small-context free models don't break. ~4 characters ≈ 1 token.</p>
         <label className="check"><input type="checkbox" checked={flanking} onChange={(e) => setFlanking(e.target.checked)} /> <span>Optional rule: <strong>flanking</strong> (advantage on melee attacks when an ally is on the opposite side of the target)</span></label>
         <label className="check"><input type="checkbox" checked={autoShield} onChange={(e) => setAutoShield(e.target.checked)} /> <span>Casters who know <strong>Shield</strong> cast it automatically when it would turn a hit into a miss</span></label>
+        <label className="field"><span>Automatic images <span className="muted">(uses your image provider from Settings; paid providers cost per image)</span></span>
+          <select value={images} onChange={(e) => setImages(e.target.value as typeof images)}>
+            <option value="off">Off</option>
+            <option value="scenes">A picture for each new scene and battle</option>
+            <option value="tags">When the DM calls for one ([IMAGE …])</option>
+            <option value="both">Both</option>
+          </select>
+        </label>
         {aiNeeded && !llm.enabled && <p className="note warn">⚠ AI seats need a provider. Set one up in Settings, or make every seat human.</p>}
         <div className="form-actions">
           <button className="btn primary big" disabled={aiNeeded && !llm.enabled} onClick={async () => {
             try {
               const allSeats: Seat[] = [dm, ...sheets.map((sh) => seatOf(sh))];
-              onStart(await newGame(c, session, allSeats, sheets, budget, { flanking, autoShield }));
+              onStart(await newGame(c, session, allSeats, sheets, budget, { flanking, autoShield, images }));
             } catch (e) { toast(`Couldn't start: ${(e as Error).message}`, 'error'); }
           }}>⚔ Start the game</button>
         </div>
@@ -164,13 +177,20 @@ function ModelPick({ value, onChange }: { value: SeatModel; onChange: (m: SeatMo
 
 // ---------------- Game ----------------
 
+/** Image requests already started — module level so a remount of the game screen can't start them twice. */
+const handledImages = new Set<string>();
+
 const SPEEDS: [number, string][] = [[0, 'Fast'], [1500, 'Normal'], [4000, 'Slow']];
 
 function GameScreen({ c, session, g, setG, onChange, onReset }: {
   c: Campaign; session: Session; g: GameState; setG: (g: GameState) => void; onChange: (c: Campaign) => void; onReset: () => void;
 }) {
-  const { llm, toast, playMood, runAi, aiBusy } = useApp();
+  const { llm, img, toast, playMood, runAi, aiBusy } = useApp();
   const [running, setRunning] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(voice.enabled);
+  const [waitVoice, setWaitVoice] = useState(true);
+  const [voiceRate, setVoiceRate] = useState(voice.rate);
+  const [showVoices, setShowVoices] = useState(false);
   const [busy, setBusy] = useState(false);
   const [delay, setDelay] = useState(1500);
   const [autoMusic, setAutoMusic] = useState(true);
@@ -183,6 +203,13 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
   const appendRef = useRef<((line: string) => void) | null>(null);
   const gRef = useRef(g);
   gRef.current = g;
+  /** Images are added by the UI while a turn may be running: always keep the latest ones. */
+  const commit = (next: GameState) => {
+    const merged = { ...next, images: gRef.current.images ?? next.images };
+    gRef.current = merged;
+    setG(merged);
+    return merged;
+  };
   const abortRef = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -196,9 +223,7 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
     setBusy(true);
     setStream(undefined);
     try {
-      const next = await step(gRef.current, env(signal));
-      gRef.current = next;
-      setG(next);
+      commit(await step(gRef.current, env(signal)));
       return true;
     } catch (e) {
       if ((e as Error).name !== 'AbortError') toast(`Turn failed: ${(e as Error).message}`, 'error');
@@ -220,6 +245,7 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
         if (cur.status !== 'running' || cur.waitingFor) break;
         const ok = await doStep(ac.signal);
         if (!ok || cancelled) { if (!cancelled) setRunning(false); break; }
+        if (waitVoice) await voice.waitIdle(ac.signal);
         if (delay) await new Promise((r) => setTimeout(r, delay));
       }
     })();
@@ -229,6 +255,33 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' }); }, [g.log.length, stream?.text]);
   useEffect(() => { if (g.status === 'ended') setRunning(false); }, [g.status]);
 
+  // Voice: read new narration and dialogue aloud.
+  const spoken = useRef(g.log.length);
+  useEffect(() => {
+    const fresh = g.log.slice(spoken.current);
+    spoken.current = g.log.length;
+    if (!voice.enabled) return;
+    for (const m of fresh) {
+      if (m.kind === 'narration') voice.speak('DM', m.text);
+      else if (m.kind === 'dialogue' && m.speaker) voice.speak(m.speaker, m.text);
+    }
+  }, [g.log.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Images: generate requested pictures in the background.
+  useEffect(() => {
+    const style = ART_STYLES.find((a) => a.id === c.options.artStyle)?.prompt ?? ART_STYLES[0].prompt;
+    for (const req of g.imageRequests ?? []) {
+      if (handledImages.has(req.id) || g.images?.some((i) => i.id === req.id)) continue;
+      handledImages.add(req.id);
+      generateImage(img, `${req.prompt}, ${style}`, { wide: true }).then((res) => {
+        const cur = gRef.current;
+        const next = { ...cur, images: [...(cur.images ?? []), { id: req.id, afterMsgId: req.afterMsgId, imageId: res.id, caption: req.caption }] };
+        gRef.current = next;
+        setG(next);
+      }).catch((e) => toast(`Scene image failed: ${(e as Error).message}`, 'error'));
+    }
+  }, [g.imageRequests]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const waitingSeat = g.seats.find((s) => s.id === g.waitingFor);
   const waitingName = waitingSeat ? (waitingSeat.role === 'dm' ? 'the DM' : g.sheets.find((x) => x.id === waitingSeat.sheetId)?.name) : undefined;
   const cur = currentCreature(g);
@@ -237,9 +290,7 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
   async function submit(text: string) {
     setBusy(true);
     try {
-      const next = await submitHuman(gRef.current, text, env());
-      gRef.current = next;
-      setG(next);
+      commit(await submitHuman(gRef.current, text, env()));
       setKick((k) => k + 1);
     } catch (e) {
       toast(`Couldn't apply that: ${(e as Error).message}`, 'error');
@@ -259,9 +310,41 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
           <button className="btn" disabled={running || busy || g.status !== 'running' || !!g.waitingFor} onClick={() => doStep()}>⏭ One turn</button>
           <select value={delay} onChange={(e) => setDelay(Number(e.target.value))} aria-label="Speed">{SPEEDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           <label className="check small"><input type="checkbox" checked={autoMusic} onChange={(e) => setAutoMusic(e.target.checked)} /> auto music</label>
+          <button className={`btn small ${voiceOn ? 'primary' : ''}`} disabled={!voice.supported} title={voice.supported ? 'Read narration and dialogue aloud' : 'This browser has no speech synthesis'}
+            onClick={() => { voice.enabled = !voiceOn; if (voiceOn) voice.stop(); setVoiceOn(!voiceOn); }}>{voiceOn ? '🔊 Voice on' : '🔈 Voice'}</button>
+          {voiceOn && <button className="btn small ghost" onClick={() => setShowVoices((v) => !v)}>Voices…</button>}
+          <select value={g.rules?.images ?? 'off'} onChange={(e) => commit({ ...gRef.current, rules: { flanking: false, autoShield: true, ...gRef.current.rules, images: e.target.value as 'off' } })} aria-label="Auto images" title="Automatic images (uses your image provider)">
+            <option value="off">🖼 Images: off</option>
+            <option value="scenes">🖼 Scenes &amp; battles</option>
+            <option value="tags">🖼 When the DM asks</option>
+            <option value="both">🖼 Both</option>
+          </select>
           <span className="spacer" />
           <span className="muted small">{g.combat ? `⚔ Round ${g.combat.round} · ${cur?.name}'s turn` : `Scene ${Math.min(g.sceneIndex + 1, session.scenes.length)}/${session.scenes.length}: ${session.scenes[g.sceneIndex]?.title ?? 'wrap-up'}`}</span>
         </div>
+
+        {voiceOn && showVoices && (
+          <div className="card voice-panel">
+            <div className="card-head"><strong>Voices</strong><span className="spacer" />
+              <label className="small">Speed <input type="range" min={0.6} max={1.6} step={0.1} value={voiceRate} onChange={(e) => { voice.rate = Number(e.target.value); setVoiceRate(voice.rate); }} /></label>
+              <label className="check small"><input type="checkbox" checked={waitVoice} onChange={(e) => setWaitVoice(e.target.checked)} /> auto-play waits for the voice</label>
+            </div>
+            {['DM', ...g.sheets.map((x) => x.name)].map((who) => {
+              const p = voice.prefsFor(who);
+              return (
+                <div key={who} className="voice-row">
+                  <strong>{who}</strong>
+                  <select value={p.voiceURI ?? ''} onChange={(e) => { voice.setPrefs(who, { ...p, voiceURI: e.target.value }); setVoiceRate((r) => r + 0); setShowVoices(true); }} aria-label={`${who} voice`}>
+                    {voice.voices().map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>)}
+                  </select>
+                  <label className="small">pitch <input type="range" min={0.5} max={1.6} step={0.05} defaultValue={p.pitch} onChange={(e) => voice.setPrefs(who, { ...voice.prefsFor(who), pitch: Number(e.target.value) })} /></label>
+                  <button className="btn small ghost" onClick={() => { voice.stop(); voice.speak(who, who === 'DM' ? 'The torchlight flickers as something stirs in the dark.' : `I'm ${who}. Let's go.`); }}>▶ Test</button>
+                </div>
+              );
+            })}
+            <p className="muted small">Voices come from your browser and operating system (free, offline). Monsters and NPCs speak with the DM's voice.</p>
+          </div>
+        )}
 
         {g.map && g.combat && (() => {
           const humanTurn = !!waitingSeat && !!cur && (waitingSeat.role === 'dm' ? cur.kind !== 'pc' : waitingSeat.sheetId === cur.sheetId);
@@ -294,9 +377,12 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
 
         <div className="chat" ref={logRef}>
           {g.log.map((m) => (
-            <div key={m.id} className={`msg msg-${m.kind} ${m.side ? `side-${m.side}` : ''} ${m.dmOnly ? 'dm-only' : ''}`}>
-              {m.speaker && m.kind !== 'action' && <div className="msg-who">{m.speaker}</div>}
-              <div className="msg-text">{m.kind === 'action' ? <><strong>{m.speaker}</strong> {m.text}</> : m.kind === 'dialogue' ? `“${m.text.replace(/^["“]|["”]$/g, '')}”` : m.text}</div>
+            <div key={m.id} className="msg-group">
+              <div className={`msg msg-${m.kind} ${m.side ? `side-${m.side}` : ''} ${m.dmOnly ? 'dm-only' : ''}`}>
+                {m.speaker && m.kind !== 'action' && <div className="msg-who">{m.speaker}</div>}
+                <div className="msg-text">{m.kind === 'action' ? <><strong>{m.speaker}</strong> {m.text}</> : m.kind === 'dialogue' ? `“${m.text.replace(/^["“]|["”]$/g, '')}”` : m.text}</div>
+              </div>
+              {(g.images ?? []).filter((im) => im.afterMsgId === m.id).map((im) => <ChatImage key={im.id} imageId={im.imageId} caption={im.caption} />)}
             </div>
           ))}
           {stream && (
@@ -350,7 +436,7 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
         <section className="card">
           <h3>Director</h3>
           <p className="muted small">Private note to the DM, used on its next turn: "introduce a rival", "go easier", "move to the heist".</p>
-          <form className="input-row" onSubmit={(e) => { e.preventDefault(); if (note.trim()) { setG(addDirectorNote(g, note.trim())); setNote(''); } }}>
+          <form className="input-row" onSubmit={(e) => { e.preventDefault(); if (note.trim()) { commit(addDirectorNote(gRef.current, note.trim())); setNote(''); } }}>
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Nudge the DM…" aria-label="Director note" />
             <button className="btn">Send</button>
           </form>
@@ -358,7 +444,7 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
             <summary>DM tools (apply now)</summary>
             <p className="muted small">Tags applied immediately, e.g. <code>[HEAL Vex 2d4+2]</code> <code>[COMBAT Goblin x2]</code> <code>[CONDITION Kara prone]</code> <code>[REST short]</code> <code>[END]</code>. Text outside tags is logged as DM narration.</p>
             <textarea rows={3} value={tools} onChange={(e) => setTools(e.target.value)} />
-            <button className="btn small" onClick={() => { if (tools.trim()) { setG(dmIntervene(g, tools, env())); setTools(''); setKick((k) => k + 1); } }}>Apply</button>
+            <button className="btn small" onClick={() => { if (tools.trim()) { commit(dmIntervene(gRef.current, tools, env())); setTools(''); setKick((k) => k + 1); } }}>Apply</button>
           </details>
         </section>
 
@@ -384,3 +470,16 @@ function GameScreen({ c, session, g, setG, onChange, onReset }: {
   );
 }
 
+
+function ChatImage({ imageId, caption }: { imageId: string; caption: string }) {
+  const url = useImageUrl(imageId);
+  const [zoom, setZoom] = useState(false);
+  if (!url) return null;
+  return (
+    <figure className="chat-image">
+      <img src={url} alt={caption} onClick={() => setZoom(true)} />
+      <figcaption className="muted small">{caption}</figcaption>
+      {zoom && <div className="lightbox" onClick={() => setZoom(false)} role="dialog" aria-label={caption}><img src={url} alt={caption} /></div>}
+    </figure>
+  );
+}
