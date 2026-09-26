@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import type { CampaignOptions, Length, Tone } from '../lib/types';
-import { ART_STYLES, TONES } from '../data/story';
-import { randomSeed } from '../lib/rng';
+import type { CampaignOptions, Length, PartyMember, Tone } from '../lib/types';
+import { ART_STYLES, PC_CLASSES, TONES } from '../data/story';
+import { SPECIES } from '../data/names';
+import { randomSeed, uid } from '../lib/rng';
 import { useApp } from './context';
 
 export const DEFAULT_OPTIONS: CampaignOptions = {
-  seed: '', title: '', tones: [], startLevel: 1, endLevel: 10, partySize: 4, length: 'medium', artStyle: 'painterly', notes: '',
+  seed: '', title: '', tones: [], startLevel: 1, endLevel: 10, partySize: 4, length: 'medium', artStyle: 'painterly', notes: '', party: [],
 };
 
 export function GenerateForm({ initial, onGenerate }: { initial: CampaignOptions; onGenerate: (o: CampaignOptions, expand: boolean) => void }) {
@@ -14,6 +15,9 @@ export function GenerateForm({ initial, onGenerate }: { initial: CampaignOptions
   const [expand, setExpand] = useState(llm.enabled);
   const set = <K extends keyof CampaignOptions>(k: K, v: CampaignOptions[K]) => setO((p) => ({ ...p, [k]: v }));
 
+  const party = o.party ?? [];
+  const setPc = (id: string, p: Partial<PartyMember>) => set('party', party.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  const addPc = () => set('party', [...party, { id: uid(), name: '', species: 'Human', cls: 'Fighter', hook: '' }]);
   const toggleTone = (t: Tone) => set('tones', o.tones.includes(t) ? o.tones.filter((x) => x !== t) : [...o.tones, t]);
 
   return (
@@ -60,11 +64,33 @@ export function GenerateForm({ initial, onGenerate }: { initial: CampaignOptions
       <fieldset className="field">
         <legend>Length</legend>
         <div className="chips">
-          {([['short', '3 acts'], ['medium', '4 acts'], ['long', '5 acts']] as [Length, string][]).map(([v, l]) => (
-            <button type="button" key={v} className={`chip ${o.length === v ? 'on' : ''}`} onClick={() => set('length', v)} aria-pressed={o.length === v}>
+          {([['short', '3 acts'], ['medium', '4 acts'], ['long', '5 acts'], ['epic', '7 acts · mid-boss']] as [Length, string][]).map(([v, l]) => (
+            <button type="button" key={v} className={`chip ${o.length === v ? 'on' : ''}`} aria-pressed={o.length === v}
+              onClick={() => setO((p) => ({ ...p, length: v, ...(v === 'epic' && p.endLevel - p.startLevel < 12 ? { startLevel: 1, endLevel: 20 } : {}) }))}>
               {v[0].toUpperCase() + v.slice(1)} <span className="muted">· {l}</span>
             </button>
           ))}
+        </div>
+      </fieldset>
+
+      <fieldset className="field">
+        <legend>Party <span className="muted">(optional: the AI weaves backstories into acts and sessions)</span></legend>
+        {party.map((pc) => (
+          <div key={pc.id} className="pc-row">
+            <input placeholder="Name" value={pc.name} onChange={(e) => setPc(pc.id, { name: e.target.value })} aria-label="Character name" />
+            <select value={pc.species} onChange={(e) => setPc(pc.id, { species: e.target.value })} aria-label="Species">
+              {[...new Set(SPECIES)].map((x) => <option key={x}>{x}</option>)}
+            </select>
+            <select value={pc.cls} onChange={(e) => setPc(pc.id, { cls: e.target.value })} aria-label="Class">
+              {PC_CLASSES.map((x) => <option key={x}>{x}</option>)}
+            </select>
+            <input className="pc-hook" placeholder="Backstory hook, e.g. hunting the cult that burned her village" value={pc.hook} onChange={(e) => setPc(pc.id, { hook: e.target.value })} aria-label="Backstory hook" />
+            <button type="button" className="btn icon ghost" onClick={() => set('party', party.filter((x) => x.id !== pc.id))} aria-label="Remove character">✕</button>
+          </div>
+        ))}
+        <div className="form-actions">
+          <button type="button" className="btn small" onClick={addPc}>＋ Add character</button>
+          {party.length > 0 && party.length !== o.partySize && <button type="button" className="btn small ghost" onClick={() => set('partySize', party.length)}>Set players to {party.length}</button>}
         </div>
       </fieldset>
 

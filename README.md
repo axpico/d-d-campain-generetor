@@ -4,9 +4,26 @@ A browser app that generates complete D&D 5e (2024 rules) campaigns: villain, pl
 
 **Hybrid engine:** hand-written random tables build a structured, seeded skeleton. An optional LLM then rewrites it into connected prose, naming NPCs, factions and places across sections so it reads as one campaign. The app works fully without AI.
 
+**Built for free and small models:**
+- The AI replies in simple `@@KEY` labelled text blocks instead of JSON.
+- Work is sent in small batches, with short keys (`N3`, `L2`).
+- Rate limits and empty replies are retried automatically, and missing items are re-requested one at a time.
+- `<think>` blocks are stripped.
+- Output streams live into a panel, and a Stop button cancels the job.
+
 ## Features
 
-- **Guided form:** tone(s) (heroic, dark, intrigue, exploration, comedic, mystery, war, nautical, planar, survival), level range, party size, length (3–5 acts), art style, free-text notes for the AI.
+- **Guided form:** tone(s) (heroic, dark, intrigue, exploration, comedic, mystery, war, nautical, planar, survival), level range, party size, length (3, 4 or 5 acts, or **Epic**: 7 acts, levels 1–20, with a mid-campaign lieutenant showdown), art style, free-text notes for the AI.
+- **Party sheet:** each PC's name, species, class and backstory hook. Acts get PC spotlights, and the AI weaves the hooks into acts and sessions.
+- **Session-by-session play:** the campaign is pre-planned into 3–4 hour sessions per act. Each session has:
+  - a "previously…" recap and a strong start;
+  - 5 scenes with read-aloud text, purpose, possible outcomes, NPCs, a music mood and encounters;
+  - 8 secrets & clues, NPC dialogue, treasure and a prep checklist.
+  After a game night, write what happened in the **play log**, and the next session is rewritten by the AI to follow from it.
+- **Side quests** in every act, with a quest giver and a reward.
+- **Ambient music:** 12 moods (tavern, dungeon, battle, boss, horror, sea…) generated live in the browser with the Web Audio API. No files, no network, no copyright. Every scene has a ♪ button that crossfades to its mood.
+- **Table tools:** dice roller (`2d6+3`, `1d20 adv`, `4d6kh3`), initiative tracker with HP and conditions, and quick improvisation generators (NPC, names, encounter, loot, rumor, complication).
+- **Edit anything:** every description, read-aloud box, title and note can be edited by hand (✎).
 - **Shareable seeds:** the same seed and options produce the same skeleton.
 - **Campaign content:** villain (motivation, plan, weakness, lair, lieutenants, SRD stat block to reskin), acts with hooks, goals, climaxes and rewards, factions, NPCs with secrets and wants, rumor table.
 - **Encounters** built with the 2024 DMG XP budget (Low / Moderate / High × party size), themed to the villain's minions. The final battle features the villain's stat block and warns when its CR doesn't fit the level.

@@ -227,36 +227,52 @@ export const LOCATION_FEATURES = [
   'a colossal skeleton', 'an alchemist\'s greenhouse', 'a sealed door carved with runes', 'a lighthouse',
 ];
 
+// Seven narrative stages. Shorter campaigns use a subset (see ACTS_BY_LENGTH in gen/campaign.ts).
 export const ACT_STRUCTURE: { title: string[]; summary: string[] }[] = [
-  {
-    title: ['Sparks in the Dark', 'An Ill Omen', 'The Call', 'Small Beginnings', 'Strange Tidings'],
+  { // 0 — beginnings
+    title: ['Sparks in the Dark', 'An Ill Omen', 'The Call', 'Small Beginnings', 'Strange Tidings', 'First Blood'],
     summary: [
       'Trouble in {place} draws the party in. The first signs of {villain}\'s plan surface, though no one yet sees the whole shape.',
       'A local crisis in {place} hides the first move of a greater scheme. The party earns a name — and enemies.',
+      'What looks like an ordinary job in {place} goes wrong in a way that points to something much larger.',
     ],
   },
-  {
-    title: ['Threads of the Web', 'The Widening Gyre', 'Allies and Knives', 'Roads of Ash'],
+  { // 1 — widening
+    title: ['Threads of the Web', 'The Widening Gyre', 'Allies and Knives', 'Roads of Ash', 'Many Masks'],
     summary: [
       'Following leads across {region}, the party learns {villain} exists and what they want. {faction} offers help — for a price.',
       'The party races {villain}\'s agents to key sites. Loyalties are tested as {faction} reveals its own agenda.',
     ],
   },
-  {
-    title: ['The Turning', 'A Price Paid', 'Betrayal at {place}', 'The Dark Hour'],
+  { // 2 — midpoint showdown with a lieutenant
+    title: ['The Lieutenant', 'Blood on the Crown', 'A Victory Too Easy', 'The Middle Gate'],
+    summary: [
+      'The party finally corners {boss}, one of {villain}\'s chief servants, at {place}. Winning costs them — and reveals the plan is bigger than they thought.',
+      'A direct strike against {boss} succeeds, but it was exactly what {villain} wanted to happen.',
+    ],
+  },
+  { // 3 — turning / setback
+    title: ['The Turning', 'A Price Paid', 'Betrayal at {place}', 'The Fall of {place}'],
     summary: [
       'A major setback: {villain} achieves a key goal. An ally falls or turns, and the party must regroup.',
       'The party strikes at {villain}\'s power base and learns a devastating truth about the plan.',
     ],
   },
-  {
-    title: ['Gathering Storm', 'Against the Tide', 'The Long March'],
+  { // 4 — gathering allies
+    title: ['Gathering Storm', 'Against the Tide', 'The Long March', 'Oaths Renewed'],
     summary: [
       'Forging alliances between old rivals, the party prepares for the final confrontation and hunts for {villain}\'s weakness.',
-      'The world shifts as {villain}\'s plan nears completion. Only bold action can turn the tide.',
+      'The world shifts as {villain}\'s plan nears completion. Only bold action — and unlikely friends like {faction} — can turn the tide.',
     ],
   },
-  {
+  { // 5 — dark hour / road to the lair
+    title: ['The Dark Hour', 'Road to {lair}', 'The Last Key', 'Night Before the Storm'],
+    summary: [
+      'With {region} in chaos, the party must seize the last thing standing between them and {lair}: the key, the path, or the truth about {villain}\'s weakness.',
+      '{villain} strikes first and hard. Survivors look to the party as the last hope.',
+    ],
+  },
+  { // 6 — finale
     title: ['The Last Door', 'Endgame', 'Crown of Ashes', 'Where It Ends'],
     summary: [
       'The party assaults {lair} to stop {villain} once and for all.',
@@ -358,3 +374,171 @@ export const TOWN_BUILDINGS = [
   'Tavern', 'Temple', 'Smithy', 'Market', 'Town Hall', 'General Store', 'Stables', 'Guardhouse', 'Alchemist', 'Library',
   'Manor', 'Warehouse', 'Bathhouse', 'Mill', 'Shrine', 'Tailor', 'Jeweler', 'Wizard\'s Tower', 'Docks', 'Graveyard',
 ];
+
+// ---------- Side quests ----------
+export const SIDE_QUESTS: { title: string; summary: string }[] = [
+  { title: 'The Missing Apprentice', summary: '{npc}\'s apprentice vanished near {place}. Tracks lead somewhere nobody goes at night.' },
+  { title: 'A Debt of Honor', summary: '{npc} needs someone to deliver a sealed apology — and payment — to a rival in {place} before a duel at dawn.' },
+  { title: 'Beast of the Old Road', summary: 'Something is killing livestock on the road to {place}. The locals blame {faction}.' },
+  { title: 'Stolen Relic', summary: 'A holy relic was stolen from the shrine in {place}. The thief left a calling card.' },
+  { title: 'The Haunted Mill', summary: 'The mill outside {place} grinds on its own at night. {npc} will pay to make it stop.' },
+  { title: 'Smuggler\'s Offer', summary: '{npc} offers good coin to move a crate through {place} with no questions asked.' },
+  { title: 'Lost Letters', summary: 'A sack of undelivered letters holds secrets about {faction} — and one about {villain}.' },
+  { title: 'The Tournament', summary: 'A contest in {place} offers a prize the party badly needs; a contestant is cheating with magic.' },
+  { title: 'Forgotten Grave', summary: 'A ghost in {place} will not rest until its killer is named. The killer is still alive.' },
+  { title: 'Poisoned Well', summary: 'The well in {place} was poisoned. {npc} suspects a neighbor; the truth is stranger.' },
+  { title: 'Wedding Crashers', summary: 'A noble wedding in {place} is the target of an assassination — or a heist. Maybe both.' },
+  { title: 'The Cartographer\'s Wager', summary: '{npc} bet their fortune that a lost ruin exists. Prove them right and share the prize.' },
+  { title: 'Prisoner Exchange', summary: '{faction} holds someone the party needs. They want one of their own back in return.' },
+  { title: 'Plague Cart', summary: 'A cart of sick refugees is turned away from {place}. Someone must find a cure — or the cause.' },
+  { title: 'The Talking Sword', summary: 'A sentient sword in {place} wants to be returned to its tomb, and will not shut up about it.' },
+  { title: 'Fey Bargain', summary: 'A child in {place} traded their name to a fey creature for a wish. The fey wants to collect.' },
+  { title: 'Rival Adventurers', summary: 'A rival party is racing the party to the same prize in {place}. They play dirty.' },
+  { title: 'Monster Hunt Contract', summary: '{faction} posts a bounty on a monster near {place}. The monster is protecting something.' },
+];
+
+export const SPOTLIGHTS = [
+  'A figure from {pc}\'s past appears in {place}: {hook}.',
+  'A clue ties {villain}\'s plan directly to {pc}\'s history ({hook}).',
+  '{pc} is recognized in {place} — for better or worse ({hook}).',
+  'A letter addressed to {pc} arrives, touching on {hook}.',
+  '{npc} knows something about {pc}\'s past ({hook}) and wants a favor in exchange.',
+];
+
+export const PC_CLASSES = ['Barbarian', 'Bard', 'Cleric', 'Druid', 'Fighter', 'Monk', 'Paladin', 'Ranger', 'Rogue', 'Sorcerer', 'Warlock', 'Wizard'];
+
+// ---------- Session tables ----------
+export const STRONG_STARTS = [
+  'The session opens mid-action: {place} is on fire and screams come from the market.',
+  'An arrow thunks into the table between the party — with a note tied to it.',
+  '{npc} bursts in, bleeding, gasping a single name: {villain}.',
+  'The party wakes to find their camp surrounded by silent, hooded figures.',
+  'A bell tolls thirteen times over {place}. Everyone in the street stops and stares at the party.',
+  'The bridge ahead collapses just as the party reaches it; something below is climbing up.',
+  'A child tugs a PC\'s sleeve: "The lady in the well says you\'re late."',
+  'The party\'s employer is found dead at the agreed meeting spot — and the guards arrive a minute later.',
+  'A storm drives a ship aground right in front of the party; its crew is missing.',
+  'A procession blocks the road in {place}; the coffin it carries is knocking from the inside.',
+  '{faction} agents corner the party with an offer that is clearly not optional.',
+  'Mid-meal, every candle in the inn goes out at once. When they relight, a guest is gone.',
+];
+
+export const SCENE_TEMPLATES: Record<string, { title: string[]; purpose: string[]; outcome: string[] }> = {
+  social: {
+    title: ['Negotiation with {npc}', 'An Audience at {place}', 'Old Friends, New Terms', 'The Informant', 'A Tense Dinner'],
+    purpose: ['Win {npc}\'s cooperation or learn what they are hiding.', 'Get information the party needs to advance.', 'Choose a side — or play both.'],
+    outcome: ['{npc} helps, at a price.', 'A lie is revealed; trust breaks or deepens.', 'The party learns where to go next.'],
+  },
+  exploration: {
+    title: ['Searching {place}', 'Ruins Beneath {place}', 'The Sealed Archive', 'Signs in the Wild'],
+    purpose: ['Find the clue or item hidden here.', 'Discover what really happened at {place}.', 'Map the way forward.'],
+    outcome: ['A secret is found, pointing onward.', 'Something wakes up.', 'The party finds a shortcut — or a trap.'],
+  },
+  combat: {
+    title: ['Ambush at {place}', 'Hold the Line', 'Showdown', 'Blood in the Streets', 'The Guardians'],
+    purpose: ['Survive and learn who sent the attackers.', 'Protect someone or something for 5 rounds.', 'Defeat a key enemy.'],
+    outcome: ['A survivor can be questioned.', 'The enemy flees with a vital item.', 'Victory, and a clue on the bodies.'],
+  },
+  puzzle: {
+    title: ['The Riddle Door', 'The Clockwork Lock', 'Mirror Hall', 'The Star Chart'],
+    purpose: ['Open the way forward using clues found earlier.', 'Solve it before the room floods/collapses.'],
+    outcome: ['The path opens.', 'Failure triggers a fight or a cost, but the way still opens.'],
+  },
+  travel: {
+    title: ['The Road to {place}', 'Crossing the Wilds', 'River Passage', 'Mountain Pass'],
+    purpose: ['Show the world changing under {villain}\'s influence.', 'Arrive at the destination with resources strained.'],
+    outcome: ['The party arrives — but not unnoticed.', 'A chance meeting on the road changes plans.'],
+  },
+  infiltration: {
+    title: ['Behind Enemy Lines', 'The Masquerade', 'Night Heist', 'Undercover at {place}'],
+    purpose: ['Get in, get the thing, get out unseen.', 'Plant or steal evidence.'],
+    outcome: ['Clean escape with the prize.', 'Discovered: chase or fight.'],
+  },
+  rest: {
+    title: ['Campfire Talk', 'A Night at the Inn', 'Tending Wounds', 'Quiet Before the Storm'],
+    purpose: ['Let the PCs breathe, bond, and reflect; drop a personal hook.', 'Recover and plan.'],
+    outcome: ['A PC backstory thread surfaces.', 'A dream or vision foreshadows what is coming.'],
+  },
+};
+
+export const CLUES = [
+  '{npc} was seen meeting a {faction} agent at night.', 'A ledger shows payments from {faction} to someone in {place}.',
+  'The symbol of {faction} is carved under the altar in {place}.', '{villain}\'s plan requires {n} relics; one is already missing.',
+  '{npc}\'s secret: they {secret}.', 'The attackers carried maps of {place} with one building circled.',
+  'A prisoner mutters about "{lair}".', 'Old records show {villain} was born in {place}.',
+  'The poison used is only brewed by the herbalists of {place}.', 'A coded letter mentions a date: the next full moon.',
+  'Witnesses in {place} describe a stranger matching {npc}.', '{villain}\'s weakness: {weakness} — hinted at in an old ballad.',
+  'A dying enemy reveals a password: "{password}".', 'The sigil on the enemies\' armor matches {faction}\'s old crest.',
+  'Rumor confirmed: {rumor}',
+];
+
+export const PASSWORDS = ['ashen dawn', 'the bell tolls', 'hollow crown', 'salt and silver', 'thirteenth hour', 'the drowned star'];
+
+export const PREP_ITEMS = [
+  'Review stat blocks: {monsters}.', 'Prepare a handout: a map of {place}.', 'Pick 3 names for improvised NPCs.',
+  'Decide how {npc} reacts if the party lies to them.', 'Note each PC\'s current goal and a way to touch it this session.',
+  'Prepare a fallback if the party skips the main scene.', 'Print or bookmark the battle map for {place}.',
+  'Queue music moods: {moods}.', 'Check treasure: {treasure}.', 'Write down the 3 secrets you most want revealed.',
+];
+
+// ---------- Expanded tables ----------
+VILLAIN_ARCHETYPES.push(
+  { name: 'death cult high priest', statBlock: 'Priest', tones: ['dark', 'mystery', 'war'] },
+  { name: 'beholder crime lord', statBlock: 'Aboleth', tones: ['intrigue', 'comedic', 'dark'] },
+  { name: 'werewolf alpha', statBlock: 'Werewolf', tones: ['survival', 'dark', 'mystery'] },
+  { name: 'corrupted archdruid', statBlock: 'Green Hag', tones: ['survival', 'exploration', 'dark'] },
+  { name: 'storm giant exile', statBlock: 'Storm Giant', tones: ['nautical', 'heroic', 'war'] },
+  { name: 'masked assassin guildmaster', statBlock: 'Assassin', tones: ['intrigue', 'mystery'] },
+  { name: 'medusa sculptor-queen', statBlock: 'Medusa', tones: ['exploration', 'dark', 'comedic'] },
+  { name: 'vampire lord of a drowned city', statBlock: 'Vampire', tones: ['nautical', 'dark', 'mystery'] },
+  { name: 'marilith general', statBlock: 'Marilith', tones: ['war', 'planar', 'heroic'] },
+  { name: 'white dragon of the endless winter', statBlock: 'Adult White Dragon', tones: ['survival', 'exploration', 'heroic'] },
+);
+
+MOTIVATIONS.push(
+  'to be loved by a people who once rejected them', 'to finish the work of a dead mentor', 'to stop a prophecy by fulfilling it first',
+  'to buy back their own soul', 'to prove that mortals do not need gods', 'boredom: centuries of it', 'to reunite a shattered artifact that is also their body',
+  'to punish a city for a crime it has forgotten',
+);
+
+PLANS.push(
+  'steal the dreams of an entire city to power a spell', 'marry into the royal line and poison it from within',
+  'wake a titan sleeping beneath {place}', 'collapse the only pass through the mountains and starve {region} into submission',
+  'forge a crown from the bones of {n} heroes', 'open an embassy to the Nine Hells in {place}',
+);
+
+HOOKS.push(
+  'A merchant offers the party the job nobody else in {place} will take.', 'A PC\'s old mentor sends a desperate message.',
+  'The party witnesses a kidnapping in broad daylight.', 'A temple of {place} offers a blessing — in exchange for a quest.',
+  'The party is conscripted by {faction} at swordpoint.', 'A dragon\'s shadow passes over {place}; the next day, a reward is posted.',
+);
+
+CLIMAXES.push(
+  'A race against a rising flood to escape with the prize.', 'The party must hold a gate until dawn.',
+  'A masked ball where the killer is one of the guests.', 'Fighting on the deck of a burning ship.',
+  'A dragon attacks mid-negotiation.', 'An ally reveals they worked for {villain} all along.',
+);
+
+RUMORS.push(
+  'The river ran red for an hour last week.', 'There is a door in the old crypt that was not there last year.',
+  '{npc} was a famous adventurer once — under another name.', 'Every bard in {place} refuses to sing one particular song.',
+  'The dead in the old graveyard of {place} were buried face down. On purpose.', '{faction} is recruiting — and people who refuse go missing.',
+);
+
+TWISTS.push(
+  'The floor is thin ice / rotten wood.', 'A third faction joins the fight halfway through.', 'The monsters are defending their young.',
+  'Magic behaves strangely here (wild magic on spells).', 'An NPC ally is secretly helping the enemy.', 'The fight happens in total darkness.',
+);
+
+APPEARANCE.push(
+  'twin braids and a missing ear', 'bright green eyes and a nervous twitch', 'heavy furs and a necklace of claws', 'powdered wig and perfume',
+  'priest robes stained with ink', 'a shaved head covered in scars', 'a fox-fur cloak and silver teeth', 'moth-eaten finery',
+);
+
+QUIRKS.push('keeps a diary of every stranger', 'feeds pigeons secret messages', 'laughs at funerals', 'collects bells', 'always speaks in rhyme when nervous', 'overpays for everything');
+SECRETS.push('is a doppelganger who replaced the real one', 'owes their life to {villain}', 'is heir to {faction}\'s fortune', 'buried a body under their house');
+WANTS.push('wants to be forgiven by {npc}', 'wants a dragon egg', 'wants their name cleared', 'wants to see the sea once before they die');
+PERSONALITIES.push('gentle giant', 'nervous genius', 'cheerful liar', 'stern but secretly kind', 'grandiose dreamer');
+LOCATION_FEATURES.push('a whispering statue', 'a street of fortune-tellers', 'a sunken amphitheater', 'a ruined lighthouse', 'a hanging garden', 'a bone bridge');
+ROOM_FEATURES.push('a collapsed staircase', 'a pool that shows reflections of the past', 'cages with rusty open doors', 'a mural that changes when unwatched', 'an iron door with a mouth');
+ROOM_NAMES.any.push('Scriptorium', 'Kennels', 'Summoning Chamber', 'Great Stair', 'Hall of Mirrors', 'Prison Pit', 'Chapel of Bones', 'Cistern');

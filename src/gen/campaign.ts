@@ -1,7 +1,8 @@
 import { Rng, uid } from '../lib/rng';
-import type { Act, Campaign, CampaignOptions, Faction, Location, LocationKind, Npc, Tone, Villain } from '../lib/types';
+import type { Act, Campaign, CampaignOptions, Faction, Location, LocationKind, Npc, PartyMember, SideQuest, Tone, Villain } from '../lib/types';
+import { planSessions } from './session';
 import {
-  ACT_STRUCTURE, APPEARANCE, CLIMAXES, FACTION_ADJ, FACTION_GOALS, FACTION_KINDS, FACTION_METHODS, FACTION_NOUN,
+  ACT_STRUCTURE, SIDE_QUESTS, SPOTLIGHTS, APPEARANCE, CLIMAXES, FACTION_ADJ, FACTION_GOALS, FACTION_KINDS, FACTION_METHODS, FACTION_NOUN,
   FACTION_PREFIX, FACTION_SYMBOLS, GOALS, HOOKS, LAIRS, LOCATION_FEATURES, LOCATION_SUMMARIES, MOTIVATIONS,
   NPC_ROLES, PERSONALITIES, PLANS, QUIRKS, RUMORS, SECRETS, TONE_THEMES, TONES, VILLAIN_ARCHETYPES, WANTS, WEAKNESSES,
 } from '../data/story';
@@ -13,11 +14,14 @@ import { assignNpcs, generateTown } from './town';
 import { BIOME_TERRAIN, biomeOf, generateRegionTerrain, SEA_LEVEL } from './region';
 import { TERRAIN_ENV, type Env } from '../data/monsters';
 
-const ACTS_BY_LENGTH = { short: [0, 2, 4], medium: [0, 1, 2, 4], long: [0, 1, 2, 3, 4] } as const;
-const LOCS_BY_LENGTH = { short: 7, medium: 10, long: 14 } as const;
+// Indexes into ACT_STRUCTURE's seven stages; 6 is always the finale, 2 the mid-campaign lieutenant showdown.
+export const ACTS_BY_LENGTH = { short: [0, 3, 6], medium: [0, 1, 3, 6], long: [0, 1, 2, 3, 6], epic: [0, 1, 2, 3, 4, 5, 6] } as const;
+const LOCS_BY_LENGTH = { short: 7, medium: 10, long: 14, epic: 18 } as const;
+const FINALE = 6;
+const MIDPOINT = 2;
 
 // Villain creature types that fit each archetype, used to theme encounters.
-const VILLAIN_MINION_TYPES: Record<string, string[]> = {
+export const VILLAIN_MINION_TYPES: Record<string, string[]> = {
   Lich: ['undead', 'construct'], Vampire: ['undead', 'humanoid'], 'Death Knight': ['undead', 'fiend'],
   'Adult Red Dragon': ['dragon', 'humanoid'], 'Green Hag': ['fey', 'plant', 'beast'], Archmage: ['humanoid', 'construct'],
   'Cultist Fanatic': ['humanoid', 'fiend', 'aberration'], Gladiator: ['humanoid', 'giant'], 'Bandit Captain': ['humanoid', 'monstrosity'],
@@ -26,7 +30,7 @@ const VILLAIN_MINION_TYPES: Record<string, string[]> = {
   'Mummy Lord': ['undead', 'construct'], Planetar: ['celestial', 'elemental'], Spy: ['humanoid'],
 };
 
-function ctxOf(c: Pick<Campaign, 'villain' | 'factions' | 'locations' | 'region' | 'npcs'>, rng: Rng): FillCtx {
+export function ctxOf(c: Pick<Campaign, 'villain' | 'factions' | 'locations' | 'region' | 'npcs'>, rng: Rng): FillCtx {
   const settlements = c.locations.filter((l) => l.kind !== 'dungeon');
   return {
     villain: c.villain?.name,
@@ -150,26 +154,32 @@ export function makeAct(
   locs: Location[],
   npcs: Npc[],
   used: Set<string> = new Set(),
+  party: PartyMember[] = [],
 ): Act {
   // Draw without repeats across the campaign; the villain face-off only happens from the midpoint on.
   const draw = (list: readonly string[]) => {
-    const ok = list.filter((x) => !used.has(x) && (structIdx >= 2 || !x.startsWith('Confronting {villain}')));
+    const ok = list.filter((x) => !used.has(x) && (structIdx >= 3 || !x.startsWith('Confronting {villain}')));
     const pick = rng.pick(ok.length ? ok : list);
     used.add(pick);
     return pick;
   };
   const struct = ACT_STRUCTURE[structIdx];
-  const ctx = { ...ctxOf(c, rng), place: locs[0]?.name ?? ctxOf(c, rng).place };
+  const lts = c.villain.lieutenants.map((id) => c.npcs.find((n) => n.id === id)).filter((n): n is Npc => !!n);
+  const boss = structIdx === MIDPOINT && lts.length ? lts[(number - 1) % lts.length] : undefined;
+  const ctx: FillCtx = { ...ctxOf(c, rng), place: locs[0]?.name ?? ctxOf(c, rng).place, boss: boss?.name };
   const lvl = Math.round((levels[0] + levels[1]) / 2);
   const minionTypes = VILLAIN_MINION_TYPES[c.villain.statBlock];
   const encounters = locs.slice(0, 3).map((l, i) =>
     buildEncounter(rng, {
       level: lvl, partySize, env: envFor(l), preferTypes: i > 0 ? minionTypes : undefined,
-      difficulty: i === locs.length - 1 || structIdx === 4 ? 'High' : undefined,
+      difficulty: i === locs.length - 1 || structIdx === FINALE ? 'High' : undefined,
     }),
   );
   if (encounters.length < 3) encounters.push(buildEncounter(rng, { level: lvl, partySize, preferTypes: minionTypes }));
-  if (structIdx === 4) {
+  if (boss) {
+    encounters.push(buildEncounter(rng, { level: levels[1], partySize, difficulty: 'High', title: `Showdown: ${boss.name}, ${boss.role}`, preferTypes: minionTypes }));
+  }
+  if (structIdx === FINALE) {
     encounters.push(buildEncounter(rng, { level: levels[1], partySize, difficulty: 'High', title: `Final battle: ${c.villain.name}`, preferTypes: minionTypes, boss: c.villain.statBlock }));
   }
   return {
@@ -184,8 +194,38 @@ export function makeAct(
     npcIds: npcs.map((n) => n.id),
     encounters,
     loot: rollLoot(rng, levels[1], number === 1 ? 1 : 2),
-    climax: fill(draw(CLIMAXES), ctx, rng),
+    climax: boss ? `Showdown with ${boss.name} — and a clue that ${c.villain.name} let it happen.` : fill(draw(CLIMAXES), ctx, rng),
+    sideQuests: makeSideQuests(rng, c, locs, npcs, levels[1], draw),
+    spotlight: party.length ? makeSpotlight(rng, c, party[(number - 1) % party.length], ctx) : undefined,
+    boss: boss?.id,
   };
+}
+
+function makeSideQuests(
+  rng: Rng, c: Pick<Campaign, 'villain' | 'factions' | 'locations' | 'region' | 'npcs'>, locs: Location[], npcs: Npc[],
+  level: number, draw: (l: readonly string[]) => string,
+): SideQuest[] {
+  const n = rng.int(1, 2);
+  const titles = SIDE_QUESTS.map((q) => q.title);
+  return Array.from({ length: n }, () => {
+    const title = draw(titles);
+    const q = SIDE_QUESTS.find((x) => x.title === title)!;
+    const giver = npcs.length ? rng.pick(npcs) : rng.pick(c.npcs.filter((x) => x.attitude !== 'enemy'));
+    const loc = rng.pick(locs.filter((l) => l.kind !== 'dungeon').length ? locs.filter((l) => l.kind !== 'dungeon') : locs);
+    return {
+      id: uid(),
+      title: q.title,
+      giverId: giver?.id,
+      locationId: loc?.id,
+      summary: fill(q.summary, { ...ctxOf(c, rng), npc: giver?.name, place: loc?.name }, rng),
+      reward: rollLoot(rng, level, 1),
+    };
+  });
+}
+
+function makeSpotlight(rng: Rng, c: Pick<Campaign, 'villain' | 'factions' | 'locations' | 'region' | 'npcs'>, pc: PartyMember, ctx: FillCtx): string {
+  const hook = pc.hook.trim() || `their past as a ${pc.species.toLowerCase()} ${pc.cls.toLowerCase()}`;
+  return fill(rng.pick(SPOTLIGHTS), { ...ctx, pc: pc.name || 'a PC', hook: hook.replace(/\.$/, ''), npc: ctxOf(c, rng).npc }, rng);
 }
 
 function placeLocations(rng: Rng, region: Campaign['region'], kinds: LocationKind[]) {
@@ -263,7 +303,7 @@ export function generateCampaign(opts: CampaignOptions): Campaign {
 
   const base = { villain, factions: [] as Faction[], locations, region, npcs: [] as Npc[] };
 
-  const nFactions = opts.length === 'short' ? 3 : opts.length === 'medium' ? 4 : 5;
+  const nFactions = { short: 3, medium: 4, long: 5, epic: 6 }[opts.length];
   const factionRng = rng.fork('factions');
   base.factions.push(makeFaction(factionRng, ctxOf(base, factionRng), 'enemy'));
   base.factions[0].goal = `serve ${villain.name} and see the plan through: ${villain.plan}`;
@@ -271,7 +311,7 @@ export function generateCampaign(opts: CampaignOptions): Campaign {
 
   // Lieutenants.
   const npcRng = rng.fork('npcs');
-  const nLts = opts.length === 'short' ? 2 : 3;
+  const nLts = { short: 2, medium: 3, long: 3, epic: 4 }[opts.length];
   for (let i = 0; i < nLts; i++) {
     const lt = makeNpc(npcRng, ctxOf(base, npcRng), {
       attitude: 'enemy', role: npcRng.pick(['lieutenant', 'enforcer', 'spymaster', 'high priest', 'champion']),
@@ -310,21 +350,35 @@ export function generateCampaign(opts: CampaignOptions): Campaign {
       const lair = dungeons[i];
       if (lair) lair.name = `${lair.name} (${villain.lair})`;
     }
-    return makeAct(actRng, base, si, i + 1, ranges[i], opts.partySize, locs, npcs, used);
+    return makeAct(actRng, base, si, i + 1, ranges[i], opts.partySize, locs, npcs, used, opts.party ?? []);
   });
 
   const rumorRng = rng.fork('rumors');
   const rumors = rumorRng.pickN(RUMORS, 6).map((r) => fill(r, ctxOf(base, rumorRng), rumorRng));
 
   const title = opts.title.trim() || `${rng.pick(['The', 'Shadows of the', 'Rise of the', 'Fall of the', 'Curse of the', 'Legend of the'])} ${rng.pick(['Hollow Crown', 'Ashen Throne', 'Drowned Star', 'Ninth Bell', 'Iron Saint', 'Pale Tide', 'Broken Oath', 'Last Lantern', 'Sleeping Wyrm', 'Veiled Moon'])}`;
-  const pitch = `In ${region.name}, ${villain.name} — a ${villain.archetype} — is driven ${villain.motivation.startsWith('to ') ? 'by the need ' + villain.motivation : 'by ' + villain.motivation}. Their plan: ${villain.plan}. A ${tones.map((t) => TONES.find((x) => x.id === t)!.label.toLowerCase()).join(' and ')} campaign about ${themes.join(' and ')}, for ${opts.partySize} characters from level ${opts.startLevel} to ${opts.endLevel}.`;
+  const pitch = `In ${region.name}, ${villain.name} — a ${villain.archetype} — is driven ${villain.motivation.startsWith('to ') ? 'by the need ' + villain.motivation : 'by ' + villain.motivation}. Their plan: ${villain.plan}. A ${tones.map((t) => TONES.find((x) => x.id === t)!.label.toLowerCase()).join(' and ')} campaign about ${themes.join(' and ')}, for ${opts.party?.length ? opts.party.map((p) => p.name).filter(Boolean).join(', ') || `${opts.partySize} characters` : `${opts.partySize} characters`} from level ${opts.startLevel} to ${opts.endLevel}.`;
 
   const now = Date.now();
-  return {
+  const campaign: Campaign = {
     id: uid(), createdAt: now, updatedAt: now, options: opts, title, pitch, tones, themes,
     villain, factions: base.factions, npcs: base.npcs, locations, acts,
-    region: { ...region, roads: roadNetwork(locations) }, rumors,
+    region: { ...region, roads: roadNetwork(locations) }, rumors, sessions: [],
   };
+  campaign.sessions = planSessions(rng.fork('sessions'), campaign);
+  return campaign;
+}
+
+/** Fill in fields added in later versions so older saved campaigns keep working. */
+export function migrate(c: Campaign): Campaign {
+  const m: Campaign = {
+    ...c,
+    options: { ...c.options, party: c.options.party ?? [] },
+    acts: c.acts.map((a) => ({ ...a, sideQuests: a.sideQuests ?? [] })),
+    sessions: c.sessions ?? [],
+  };
+  if (!c.sessions) m.sessions = planSessions(new Rng(c.id), m);
+  return m;
 }
 
 // ---------- Re-rolls (fresh randomness, keep ids/links stable) ----------
@@ -389,7 +443,7 @@ export function rerollAct(c: Campaign, id: string): Campaign {
   const idxs = ACTS_BY_LENGTH[c.options.length];
   const locs = old.locationIds.map((lid) => c.locations.find((l) => l.id === lid)).filter((l): l is Location => !!l);
   const npcs = old.npcIds.map((nid) => c.npcs.find((n) => n.id === nid)).filter((n): n is Npc => !!n);
-  const act = { ...makeAct(rng, c, idxs[old.number - 1], old.number, old.levels, c.options.partySize, locs, npcs, new Set([old.hook, old.climax])), id };
+  const act = { ...makeAct(rng, c, idxs[old.number - 1], old.number, old.levels, c.options.partySize, locs, npcs, new Set([old.hook, old.climax]), c.options.party ?? []), id };
   return { ...c, acts: c.acts.map((a) => (a.id === id ? act : a)), updatedAt: Date.now() };
 }
 

@@ -1,4 +1,4 @@
-import type { Campaign, Encounter, LootItem } from './types';
+import type { Campaign, Encounter, LootItem, Session } from './types';
 import { blobToDataUrl, imagesDb } from './storage';
 import { TONES } from '../data/story';
 
@@ -29,6 +29,9 @@ export async function campaignToMarkdown(c: Campaign, embedImages: boolean): Pro
   out.push(`Seed: \`${c.options.seed}\`\n`);
   out.push(await imageMd(c.mapImageId, `Map of ${c.region.name}`, embedImages));
   out.push(`## Pitch\n\n${c.pitch}\n`);
+  if (c.options.party?.length) {
+    out.push(`## Party\n\n${c.options.party.map((p) => `- **${p.name || 'Unnamed'}**: ${p.species} ${p.cls}${p.hook ? `. *Hook:* ${p.hook}` : ''}`).join('\n')}\n`);
+  }
 
   const v = c.villain;
   out.push(`## Villain: ${v.name}\n`);
@@ -41,8 +44,15 @@ export async function campaignToMarkdown(c: Campaign, embedImages: boolean): Pro
     out.push(`### Act ${a.number}: ${a.title} (levels ${a.levels[0]}–${a.levels[1]})\n`);
     out.push(`${a.summary}\n`);
     if (a.description) out.push(`${a.description}\n`);
-    out.push(`- **Hook:** ${a.hook}\n- **Goals:** ${a.goals.join('; ')}\n- **Locations:** ${a.locationIds.map(loc).join(', ')}\n- **NPCs:** ${a.npcIds.map(npc).join(', ')}\n- **Climax:** ${a.climax}\n- **Rewards:** ${loot(a.loot)}\n`);
+    out.push(`- **Hook:** ${a.hook}\n- **Goals:** ${a.goals.join('; ')}\n- **Locations:** ${a.locationIds.map(loc).join(', ')}\n- **NPCs:** ${a.npcIds.map(npc).join(', ')}\n- **Climax:** ${a.climax}\n- **Rewards:** ${loot(a.loot)}\n` +
+      (a.spotlight ? `- **PC spotlight:** ${a.spotlight}\n` : '') +
+      (a.sideQuests?.length ? `- **Side quests:**\n${a.sideQuests.map((q) => `  - *${q.title}* (from ${npc(q.giverId)}): ${q.summary} Reward: ${loot(q.reward)}`).join('\n')}\n` : ''));
     out.push(`#### Encounters\n\n${a.encounters.map(enc).join('\n')}\n`);
+  }
+
+  if (c.sessions?.length) {
+    out.push(`## Sessions\n`);
+    for (const s of c.sessions) out.push(sessionToMarkdown(c, s));
   }
 
   out.push(`## Factions\n`);
@@ -97,3 +107,29 @@ export function download(filename: string, content: string | Blob, type = 'text/
 }
 
 export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'campaign';
+
+export function sessionToMarkdown(c: Campaign, s: Session): string {
+  const npc = (id?: string) => c.npcs.find((n) => n.id === id)?.name ?? '—';
+  const loc = (id?: string) => c.locations.find((l) => l.id === id)?.name;
+  const quote = (t?: string) => (t ? t.split('\n').map((l) => `> ${l}`).join('\n') + '\n' : '');
+  const lines: string[] = [];
+  lines.push(`### Session ${s.number}: ${s.title} (level ${s.level}${s.status === 'played' ? ', played' : ''})\n`);
+  if (s.recap) lines.push(`**Previously…**\n\n${quote(s.recap)}`);
+  lines.push(`**Strong start**\n\n${quote(s.strongStart)}`);
+  s.scenes.forEach((sc, i) => {
+    lines.push(`#### ${i + 1}. ${sc.title} (${sc.kind}${loc(sc.locationId) ? `, ${loc(sc.locationId)}` : ''}, mood: ${sc.mood})\n`);
+    lines.push(`*Purpose:* ${sc.purpose}\n`);
+    if (sc.readAloud) lines.push(quote(sc.readAloud));
+    lines.push(`*Could end:* ${sc.outcome}\n`);
+    if (sc.npcIds.length) lines.push(`*NPCs:* ${sc.npcIds.map(npc).join(', ')}\n`);
+    if (sc.encounter) lines.push(enc(sc.encounter) + '\n');
+    if (sc.notes) lines.push(`*Notes:* ${sc.notes}\n`);
+  });
+  lines.push(`**Secrets & clues**\n\n${s.secrets.map((x) => `- [ ] ${x}`).join('\n')}\n`);
+  const lined = Object.entries(s.npcLines).filter(([, v]) => v);
+  if (lined.length) lines.push(`**NPC lines**\n\n${lined.map(([id, v]) => `- **${npc(id)}**: ${v.replace(/\n+/g, ' ')}`).join('\n')}\n`);
+  lines.push(`**Treasure:** ${loot(s.treasure)}\n`);
+  lines.push(`**Prep**\n\n${s.prep.map((x) => `- [ ] ${x}`).join('\n')}\n`);
+  if (s.playLog) lines.push(`**What happened:** ${s.playLog}\n`);
+  return lines.join('\n');
+}

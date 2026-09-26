@@ -7,6 +7,7 @@ export interface FillCtx {
   region?: string;
   npc?: string;
   lair?: string;
+  [key: string]: string | undefined;
 }
 
 /** Replace {token}s in a template. {n} is a small random number. */

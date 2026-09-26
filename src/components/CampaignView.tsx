@@ -4,18 +4,20 @@ import { ART_STYLES, TONES } from '../data/story';
 import {
   addNpc, rerollAct, rerollDungeon, rerollEncounter, rerollFaction, rerollLocation, rerollNpc, rerollTown, rerollVillain,
 } from '../gen/campaign';
-import { expandOne, expandSection, SECTIONS, type EntityKind } from '../ai/expand';
+import { expandAll, expandOne, expandSection, type EntityKind } from '../ai/expand';
 import { factionPrompt, locationMapPrompt, locationPrompt, npcPrompt, regionMapPrompt, villainPrompt } from '../ai/image';
 import { campaignToMarkdown, download, slug } from '../lib/markdown';
 import { RegionMap, REGION_LEGEND } from '../maps/RegionMap';
 import { DungeonMap } from '../maps/DungeonMap';
 import { TownMap } from '../maps/TownMap';
 import { ImageSlot } from './ImageSlot';
-import { AiButton, EncounterCard, Field, Loot, Pill, Prose, Reroll } from './bits';
+import { AiButton, EncounterCard, Field, Loot, Pill, Reroll } from './bits';
+import { Editable } from './Editable';
+import { SessionsView } from './SessionsView';
 import { useApp } from './context';
 
-type Tab = 'overview' | 'acts' | 'npcs' | 'factions' | 'locations' | 'maps';
-const TABS: [Tab, string][] = [['overview', 'Overview'], ['acts', 'Acts'], ['npcs', 'NPCs'], ['factions', 'Factions'], ['locations', 'Locations'], ['maps', 'World map']];
+type Tab = 'overview' | 'acts' | 'sessions' | 'npcs' | 'factions' | 'locations' | 'maps';
+const TABS: [Tab, string][] = [['overview', 'Overview'], ['acts', 'Acts'], ['sessions', 'Sessions'], ['npcs', 'NPCs'], ['factions', 'Factions'], ['locations', 'Locations'], ['maps', 'World map']];
 
 export function CampaignView({ c, onChange, saved, onSave, onNew }: {
   c: Campaign;
@@ -24,12 +26,11 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
   onSave: () => void;
   onNew: () => void;
 }) {
-  const { llm, toast } = useApp();
+  const { llm, toast, runAi, aiBusy } = useApp();
   const [tab, setTab] = useState<Tab>('overview');
   const [focusLoc, setFocusLoc] = useState<string>();
-  const [progress, setProgress] = useState<string>();
   const [embed, setEmbed] = useState(true);
-  const abort = useRef<AbortController | null>(null);
+  // Always read the newest campaign inside async AI callbacks.
   const latest = useRef(c);
   latest.current = c;
 
@@ -42,27 +43,21 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
   const setNpc = (id: string, p: Partial<Npc>) => patch((x) => ({ ...x, npcs: x.npcs.map((n) => (n.id === id ? { ...n, ...p } : n)) }));
   const setLoc = (id: string, p: Partial<Location>) => patch((x) => ({ ...x, locations: x.locations.map((l) => (l.id === id ? { ...l, ...p } : l)) }));
 
-  async function expandAll() {
-    abort.current = new AbortController();
-    let cur = latest.current;
-    try {
-      for (let i = 0; i < SECTIONS.length; i++) {
-        setProgress(`Writing ${SECTIONS[i]} (${i + 1}/${SECTIONS.length})…`);
-        cur = await expandSection(llm, cur, SECTIONS[i], abort.current.signal);
-        onChange({ ...cur, aiExpanded: true, updatedAt: Date.now() });
-      }
-      toast('AI expansion complete.', 'info');
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') toast(`AI expansion stopped: ${(e as Error).message}`, 'error');
-    } finally {
-      setProgress(undefined);
-      abort.current = null;
-    }
+  async function doExpandAll() {
+    let failed: string[] = [];
+    const ok = await runAi('Expanding the whole campaign', async (cb) => {
+      const r = await expandAll(llm, latest.current, { ...cb, onUpdate: (x) => onChange({ ...x, aiExpanded: true, updatedAt: Date.now() }) });
+      failed = r.failed;
+      onChange({ ...r.campaign, updatedAt: Date.now() });
+    });
+    if (!ok) return;
+    if (failed.length) toast(`AI expansion finished, but ${failed.length} item(s) got no text: ${failed.slice(0, 6).join(', ')}${failed.length > 6 ? '…' : ''}. Use ✨ on them to retry.`, 'error');
+    else toast('AI expansion complete.', 'info');
   }
 
   async function aiOne(kind: EntityKind, id: string) {
-    try {
-      const text = await expandOne(llm, latest.current, kind, id);
+    await runAi(`Writing ${kind}`, async (cb) => {
+      const text = await expandOne(llm, latest.current, kind, id, cb);
       patch((x) => {
         switch (kind) {
           case 'villain': return { ...x, villain: { ...x.villain, description: text } };
@@ -72,9 +67,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
           case 'act': return { ...x, acts: x.acts.map((a) => (a.id === id ? { ...a, description: text } : a)) };
         }
       });
-    } catch (e) {
-      toast(`AI failed: ${(e as Error).message}`, 'error');
-    }
+    });
   }
 
   async function exportMd() {
@@ -99,16 +92,14 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
     <div className="campaign">
       <header className="campaign-head">
         <div>
-          <h1>{c.title}</h1>
+          <h1><Editable inline value={c.title} onSave={(v) => patch((x) => ({ ...x, title: v || x.title }))} /></h1>
           <div className="muted">
-            {c.tones.map((t) => TONES.find((x) => x.id === t)?.label).join(' · ')} — Levels {c.options.startLevel}–{c.options.endLevel} · {c.options.partySize} players · {c.region.name} · seed <code>{c.options.seed}</code>
+            {c.tones.map((t) => TONES.find((x) => x.id === t)?.label).join(' · ')} — Levels {c.options.startLevel}–{c.options.endLevel} · {c.options.party?.length ? c.options.party.map((p) => p.name).filter(Boolean).join(', ') : `${c.options.partySize} players`} · {c.region.name} · seed <code>{c.options.seed}</code>
           </div>
         </div>
         <div className="toolbar no-print">
           <button className="btn primary" onClick={onSave} disabled={saved}>{saved ? '✓ Saved' : '💾 Save'}</button>
-          {progress
-            ? <button className="btn" onClick={() => abort.current?.abort()}><span className="spinner small" /> {progress} Stop</button>
-            : <button className="btn" onClick={expandAll} disabled={aiOff} title={aiOff ? 'Configure an AI provider in Settings' : 'Rewrite everything as connected prose'}>✨ Expand all with AI</button>}
+          <button className="btn" onClick={doExpandAll} disabled={aiOff || aiBusy} title={aiOff ? 'Configure an AI provider in Settings' : 'Rewrite everything as connected prose'}>✨ Expand all with AI</button>
           <button className="btn" onClick={exportMd}>⬇ Markdown</button>
           <label className="check small" title="Embed generated images as data inside the .md (bigger file, works offline)">
             <input type="checkbox" checked={embed} onChange={(e) => setEmbed(e.target.checked)} /> embed images
@@ -124,6 +115,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
           <button key={id} role="tab" aria-selected={tab === id} className={`tab ${tab === id ? 'on' : ''}`} onClick={() => setTab(id)}>
             {label}
             {id === 'npcs' && <span className="count">{c.npcs.length}</span>}
+            {id === 'sessions' && <span className="count">{c.sessions.length}</span>}
             {id === 'locations' && <span className="count">{c.locations.length}</span>}
           </button>
         ))}
@@ -133,10 +125,10 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
       <section className={`tab-panel ${tab === 'overview' ? '' : 'tab-hidden'}`}>
         <h2 className="print-only">Overview</h2>
         <div className="card">
-          <div className="card-head"><h3>Pitch</h3><AiButton disabled={aiOff} onClick={async () => {
-            try { onChange({ ...(await expandSection(llm, latest.current, 'overview')), updatedAt: Date.now() }); } catch (e) { toast((e as Error).message, 'error'); }
+          <div className="card-head"><h3>Pitch</h3><AiButton disabled={aiOff || aiBusy} onClick={async () => {
+            await runAi('Writing pitch and villain', async (cb) => { const r = await expandSection(llm, latest.current, 'overview', cb); onChange({ ...r.campaign, updatedAt: Date.now() }); });
           }} /></div>
-          <Prose text={c.pitch} />
+          <Editable value={c.pitch} onSave={(v) => patch((x) => ({ ...x, pitch: v }))} />
           <div className="muted small">Themes: {c.themes.join(' · ')}</div>
         </div>
 
@@ -145,7 +137,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
             <h3>☠ {v.name}</h3>
             <Pill kind="enemy">Villain</Pill>
             <span className="spacer" />
-            <AiButton disabled={aiOff} onClick={() => aiOne('villain', v.id)} />
+            <AiButton disabled={aiOff || aiBusy} onClick={() => aiOne('villain', v.id)} />
             <Reroll onClick={() => onChange(rerollVillain(c))} title="Re-roll villain (keeps lieutenants)" />
           </div>
           <div className="with-image">
@@ -161,7 +153,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
               <Field label="Lieutenants">{v.lieutenants.map((id) => npcName(id)).join(', ')}</Field>
             </div>
           </div>
-          <Prose text={v.description} />
+          <Editable value={v.description} placeholder="No backstory yet: ✨ to write it with AI, or ✎ to write your own." onSave={(t) => patch((x) => ({ ...x, villain: { ...x.villain, description: t } }))} />
         </div>
 
         <div className="card">
@@ -188,16 +180,26 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
               <h3>Act {a.number}: {a.title}</h3>
               <Pill>Levels {a.levels[0]}–{a.levels[1]}</Pill>
               <span className="spacer" />
-              <AiButton disabled={aiOff} onClick={() => aiOne('act', a.id)} />
+              <AiButton disabled={aiOff || aiBusy} onClick={() => aiOne('act', a.id)} />
               <Reroll onClick={() => onChange(rerollAct(c, a.id))} title="Re-roll act (keeps locations & NPCs)" />
             </div>
             <p>{a.summary}</p>
-            <Prose text={a.description} />
+            <Editable value={a.description} placeholder="✨ to write this act out with AI, or ✎ to write your own." onSave={(t) => patch((x) => ({ ...x, acts: x.acts.map((y) => (y.id === a.id ? { ...y, description: t } : y)) }))} />
             <Field label="Hook">{a.hook}</Field>
             <Field label="Goals"><ul className="inline-list">{a.goals.map((g, i) => <li key={i}>{g}</li>)}</ul></Field>
             <Field label="Locations">{a.locationIds.map((id, i) => <span key={id}>{i > 0 && ', '}<LocLink id={id} /></span>)}</Field>
             <Field label="NPCs">{a.npcIds.map((id) => npcName(id)).filter(Boolean).join(', ') || '—'}</Field>
             <Field label="Climax">{a.climax}</Field>
+            {a.spotlight && <Field label="PC spotlight">{a.spotlight}</Field>}
+            {a.sideQuests.length > 0 && (
+              <Field label="Side quests">
+                <ul className="inline-list">
+                  {a.sideQuests.map((q) => (
+                    <li key={q.id}><strong>{q.title}</strong>: {q.summary} <span className="muted small">(from {npcName(q.giverId) ?? 'a local'}; reward: {q.reward.map((r) => r.name).join(', ')})</span></li>
+                  ))}
+                </ul>
+              </Field>
+            )}
             <Field label="Rewards"><Loot items={a.loot} /></Field>
             <h4>Encounters</h4>
             <div className="encounters">
@@ -205,6 +207,12 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
             </div>
           </article>
         ))}
+      </section>
+
+      {/* ---------------- Sessions ---------------- */}
+      <section className={`tab-panel ${tab === 'sessions' ? '' : 'tab-hidden'}`}>
+        <h2 className="print-only">Sessions</h2>
+        <SessionsView c={c} onChange={onChange} goLoc={goLoc} />
       </section>
 
       {/* ---------------- NPCs ---------------- */}
@@ -218,7 +226,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
                 <h3>{n.name}</h3>
                 <Pill kind={n.attitude}>{n.attitude}</Pill>
                 <span className="spacer" />
-                <AiButton disabled={aiOff} onClick={() => aiOne('npc', n.id)} />
+                <AiButton disabled={aiOff || aiBusy} onClick={() => aiOne('npc', n.id)} />
                 <Reroll onClick={() => onChange(rerollNpc(c, n.id))} title="Re-roll NPC" />
                 <button className="btn icon ghost no-print" title="Delete NPC" onClick={() => patch((x) => ({ ...x, npcs: x.npcs.filter((m) => m.id !== n.id) }))}>🗑</button>
               </div>
@@ -232,7 +240,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
                   <Field label="Secret">{n.secret}</Field>
                 </div>
               </div>
-              <Prose text={n.description} />
+              <Editable value={n.description} onSave={(t) => setNpc(n.id, { description: t })} placeholder="✎ add notes" />
             </article>
           ))}
         </div>
@@ -248,7 +256,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
                 <h3>{f.name}</h3>
                 <Pill kind={f.attitude}>{f.attitude}</Pill>
                 <span className="spacer" />
-                <AiButton disabled={aiOff} onClick={() => aiOne('faction', f.id)} />
+                <AiButton disabled={aiOff || aiBusy} onClick={() => aiOne('faction', f.id)} />
                 <Reroll onClick={() => onChange(rerollFaction(c, f.id))} title="Re-roll faction" />
               </div>
               <div className="with-image">
@@ -262,7 +270,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
                   <Field label="Members">{c.npcs.filter((n) => n.factionId === f.id).map((n) => n.name).join(', ') || '—'}</Field>
                 </div>
               </div>
-              <Prose text={f.description} />
+              <Editable value={f.description} onSave={(t) => patch((x) => ({ ...x, factions: x.factions.map((y) => (y.id === f.id ? { ...y, description: t } : y)) }))} placeholder="✎ add notes" />
             </article>
           ))}
         </div>
@@ -272,7 +280,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
       <section className={`tab-panel ${tab === 'locations' ? '' : 'tab-hidden'}`}>
         <h2 className="print-only">Locations</h2>
         {c.locations.map((l) => (
-          <LocationCard key={l.id} l={l} c={c} focused={focusLoc === l.id} style={style} aiOff={aiOff}
+          <LocationCard key={l.id} l={l} c={c} focused={focusLoc === l.id} style={style} aiOff={aiOff || aiBusy}
             onAi={() => aiOne('location', l.id)}
             onReroll={() => onChange(rerollLocation(c, l.id))}
             onRerollLayout={() => onChange(l.dungeon ? rerollDungeon(c, l.id) : rerollTown(c, l.id))}
@@ -327,7 +335,7 @@ function LocationCard({ l, c, focused, style, aiOff, onAi, onReroll, onRerollLay
           {locals.length > 0 && <Field label="People">{locals.map((n) => `${n.name} (${n.role})`).join(', ')}</Field>}
         </div>
       </div>
-      <Prose text={l.description} />
+      <Editable value={l.description} onSave={(t) => onPatch({ description: t })} placeholder="✎ add notes" />
 
       {(l.town || l.dungeon) && (
         <div className="subsection">

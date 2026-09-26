@@ -10,7 +10,19 @@ export type Tone =
   | 'planar'
   | 'survival';
 
-export type Length = 'short' | 'medium' | 'long';
+export type Length = 'short' | 'medium' | 'long' | 'epic';
+
+export type Mood =
+  | 'tavern' | 'town' | 'travel' | 'forest' | 'dungeon' | 'battle' | 'boss'
+  | 'horror' | 'mystery' | 'sea' | 'sacred' | 'calm';
+
+export interface PartyMember {
+  id: string;
+  name: string;
+  species: string;
+  cls: string;
+  hook: string; // backstory hook the campaign can pull on
+}
 
 export interface CampaignOptions {
   seed: string;
@@ -22,6 +34,7 @@ export interface CampaignOptions {
   length: Length;
   artStyle: string;
   notes: string; // free text passed to the AI
+  party: PartyMember[];
 }
 
 export interface Npc {
@@ -180,7 +193,54 @@ export interface Act {
   encounters: Encounter[];
   loot: LootItem[];
   climax: string;
+  sideQuests: SideQuest[];
+  spotlight?: string; // PC backstory beat
+  boss?: string; // named mid-boss (lieutenant) for this act
   description?: string;
+}
+
+export interface SideQuest {
+  id: string;
+  title: string;
+  giverId?: string;
+  locationId?: string;
+  summary: string;
+  reward: LootItem[];
+}
+
+export type SceneKind = 'social' | 'exploration' | 'combat' | 'puzzle' | 'travel' | 'rest' | 'infiltration';
+
+export interface Scene {
+  id: string;
+  title: string;
+  kind: SceneKind;
+  locationId?: string;
+  npcIds: string[];
+  purpose: string;
+  outcome: string; // how it can end / what it leads to
+  mood: Mood;
+  encounter?: Encounter;
+  readAloud?: string; // AI or hand-written boxed text
+  notes?: string;
+}
+
+export interface Session {
+  id: string;
+  number: number;
+  actId: string;
+  title: string;
+  level: number;
+  status: 'planned' | 'played';
+  recap?: string;
+  strongStart: string;
+  scenes: Scene[];
+  secrets: string[]; // clues / secrets the party can discover
+  npcLines: Record<string, string>; // npc id -> sample dialogue
+  treasure: LootItem[];
+  prep: string[];
+  playLog?: string; // what actually happened at the table
+  adapted?: boolean; // rewritten from the play log
+  aiNotes?: string;
 }
 
 export interface RegionTerrainCell {
@@ -212,6 +272,7 @@ export interface Campaign {
   acts: Act[];
   region: Region;
   rumors: string[];
+  sessions: Session[];
   aiExpanded?: boolean;
   mapImageId?: string; // AI-illustrated region map
 }
