@@ -88,6 +88,7 @@ function queuePlayers(g: GameState, dmText = '') {
   g.roundActs = 0;
   g.roundPassed = [];
   g.lastSpeaker = undefined;
+  g.breakerUsed = false;
   if (!seats.length) { g.playerQueue = []; g.phase = 'dm'; return; }
   if ((g.rules?.flow ?? 'free') === 'round') {
     g.playerQueue = seats.map((s) => s.id);
@@ -98,7 +99,37 @@ function queuePlayers(g: GameState, dmText = '') {
   g.phase = 'players';
 }
 
+/** Lines each seat spoke in the recent past (spotlight balance). */
+export function spotlight(g: GameState): Map<string, number> {
+  const m = new Map(aliveSeats(g).map((s) => [s.id, 0]));
+  for (const id of g.recentSpeakers ?? []) if (m.has(id)) m.set(id, m.get(id)! + 1);
+  return m;
+}
+
 function endRound(g: GameState) {
+  const free = (g.rules?.flow ?? 'free') === 'free';
+  const speakers = Object.keys(g.roundSpoken ?? {}).filter((k) => (g.roundSpoken![k] ?? 0) > 0);
+  if (free && speakers.length === 1 && !g.breakerUsed) {
+    const solo = speakers[0];
+    const streak = g.soloStreak?.seat === solo ? g.soloStreak.rounds + 1 : 1;
+    if (streak >= 2) {
+      // DM ↔ same player again: give the floor once to the quietest other character before the DM.
+      const spot = spotlight(g);
+      const pool = aliveSeats(g).filter((s) => s.id !== solo && !(g.roundPassed ?? []).includes(s.id));
+      const fresh = pool.filter((s) => s.id !== g.lastOffered);
+      const other = (fresh.length ? fresh : pool).sort((a, b) => (spot.get(a.id) ?? 0) - (spot.get(b.id) ?? 0))[0];
+      if (other) {
+        g.lastOffered = other.id;
+        g.breakerUsed = true;
+        g.soloStreak = { seat: solo, rounds: 0 };
+        g.playerQueue = [other.id];
+        return;
+      }
+    }
+    g.soloStreak = { seat: solo, rounds: streak };
+  } else if (speakers.length > 1) {
+    g.soloStreak = undefined;
+  }
   g.playerQueue = [];
   g.quietRounds = (g.roundActs ?? 0) === 0 ? (g.quietRounds ?? 0) + 1 : 0;
   g.phase = 'dm';
@@ -112,6 +143,7 @@ function afterPlayer(g: GameState, seat: Seat, acted: boolean, said: string) {
     g.roundActs = (g.roundActs ?? 0) + 1;
     g.roundSpoken = { ...(g.roundSpoken ?? {}), [seat.id]: (g.roundSpoken?.[seat.id] ?? 0) + 1 };
     g.lastSpeaker = seat.id;
+    g.recentSpeakers = [...(g.recentSpeakers ?? []), seat.id].slice(-16);
   } else {
     g.roundPassed = [...new Set([...(g.roundPassed ?? []), seat.id])];
   }
@@ -136,10 +168,11 @@ async function moderate(g: GameState, env: Env): Promise<Seat | 'DM'> {
   if (!cands.length) return 'DM';
   const recent = g.log.slice(-14).filter((m) => !m.dmOnly && ['narration', 'dialogue', 'action', 'roll'].includes(m.kind))
     .map((m) => (m.kind === 'narration' ? `DM: ${m.text}` : m.kind === 'roll' ? `[dice] ${m.text}` : `${m.speaker}: ${m.text}`)).join('\n');
-  const who = cands.map((s) => { const sh = sheetFor(g, s)!; return `- ${sh.name} (${sh.species} ${sh.cls}${sh.personality ? `; ${sh.personality}` : ''}${g.roundSpoken?.[s.id] ? `; already spoke ${g.roundSpoken[s.id]}×` : ''})`; }).join('\n');
+  const spot = spotlight(g);
+  const who = cands.map((s) => { const sh = sheetFor(g, s)!; return `- ${sh.name} (${sh.species} ${sh.cls}${sh.personality ? `; ${sh.personality}` : ''}; ${spot.get(s.id) ?? 0} lines recently${g.roundSpoken?.[s.id] ? `, ${g.roundSpoken[s.id]} this round` : ''})`; }).join('\n');
   const text = await chat(seatLlm(dmSeat(g), env.llm), [
     { role: 'system', content: 'You moderate the flow of conversation at a tabletop RPG table. You decide who speaks next. Reply with exactly one line: "NEXT: <character name>" or "NEXT: DM".' },
-    { role: 'user', content: `Recent table talk:\n${recent}\n\nCharacters who could speak now:\n${who}\n\nWho speaks next?\n- A character who was asked something, whose goals or backstory are touched, or who would naturally react or object.\n- "DM" if the players have agreed on what to do, asked the DM a question, attempted an action the DM must resolve, or the talk is going in circles.\nReply with only: NEXT: <name> or NEXT: DM` },
+    { role: 'user', content: `Recent table talk:\n${recent}\n\nCharacters who could speak now:\n${who}\n\nWho speaks next?\n- A character who was asked something, whose goals or backstory are touched, or who would naturally react or object.\n- Share the spotlight: when several characters could plausibly react, prefer the one who has spoken least recently.\n- "DM" if the players have agreed on what to do, asked the DM a question, attempted an action the DM must resolve, or the talk is going in circles.\nReply with only: NEXT: <name> or NEXT: DM` },
   ], { maxTokens: 400, signal: env.signal });
   const pick = text.match(/NEXT\s*:\s*(.+)/i)?.[1]?.trim() ?? text.trim();
   if (/^\W*DM\b/i.test(pick) || /dungeon master/i.test(pick)) return 'DM';

@@ -159,8 +159,14 @@ ${DM_TAGS}${g.rules?.images === 'tags' || g.rules?.images === 'both' ? IMAGE_TAG
 export function dmExploreUser(g: GameState): string {
   const notes = g.directorNotes.length ? `\n\nPRIVATE DIRECTOR NOTES from the human running the app (follow them, don't mention them):\n${g.directorNotes.map((n) => `- ${n}`).join('\n')}` : '';
   const party = g.creatures.filter((c) => c.kind === 'pc').map((c) => creatureLine(c, undefined, true)).join('\n');
+  // Spotlight balance: characters with no lines among the recent player lines.
+  const recent = g.recentSpeakers ?? [];
+  const quietPcs = recent.length >= 4
+    ? g.seats.filter((s) => s.role === 'player' && !recent.slice(-8).includes(s.id)).map((s) => g.sheets.find((x) => x.id === s.sheetId)?.name).filter(Boolean)
+    : [];
+  const spot = quietPcs.length ? `\n\nSPOTLIGHT: ${quietPcs.join(', ')} ${quietPcs.length > 1 ? 'have' : 'has'} been quiet lately. Involve them: address them by name, or give them something tied to their skills or backstory. Don't keep talking to the same character.` : '';
   const quiet = g.quietRounds ? `\n\nNobody at the table reacted to your last message. Don't wait: move the story forward (an event, an NPC acts or speaks, a new detail, or advance to the next scene), and address a specific character by name.` : '';
-  return `TRANSCRIPT SO FAR:\n${transcript(g, 'dm') || '(the session is just starting: open with the recap and the strong start)'}\n\nPARTY STATUS:\n${party}${notes}${quiet}\n\nYour turn as DM. Write your narration (with tags where needed).`;
+  return `TRANSCRIPT SO FAR:\n${transcript(g, 'dm') || '(the session is just starting: open with the recap and the strong start)'}\n\nPARTY STATUS:\n${party}${notes}${spot}${quiet}\n\nYour turn as DM. Write your narration (with tags where needed).`;
 }
 
 export function dmMonsterTurn(g: GameState, m: Creature): string {

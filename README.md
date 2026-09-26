@@ -28,6 +28,7 @@ A browser app that generates complete D&D 5e (2024 rules) campaigns: villain, pl
     - Whoever is addressed by name answers next; otherwise a short moderator call picks the character who would naturally react, or hands back to the DM.
     - Players may PASS. Limits: nobody speaks twice in a row, at most 3 lines each and about 2× the party size per round.
     - If nobody reacts, the DM moves the story forward.
+    - **Spotlight balance:** the DM is told who has been quiet, and the moderator prefers quiet characters. A DM ↔ same-player ping-pong for two rounds hands the floor once to the quietest other character (rotating).
     - A classic round-robin mode is also available.
   - **The code owns the rules:** dice, attacks with advantage/disadvantage from conditions, crits, resistances, saves, concentration, death saves, the action economy, opportunity attacks, recharge abilities, legendary actions, rests. The models only choose actions and narrate.
   - **Full character sheets** with a class/level template to start from. About 70 core spells are automated; any other spell or feature is adjudicated by the DM through tags that the engine rolls.
