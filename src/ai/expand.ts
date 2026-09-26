@@ -8,6 +8,7 @@
 //  - missing items are retried once, and partial results are kept
 import type { Campaign } from '../lib/types';
 import { chat, parseBlocks, type ChatMessage, type LlmSettings } from './llm';
+import { writeSession } from './session';
 
 export const SYSTEM = `You are a veteran Dungeon Master and adventure writer for D&D 5e (2024 rules).
 You receive a procedurally generated campaign skeleton. Your job:
@@ -163,13 +164,32 @@ export async function expandSection(s: LlmSettings, c: Campaign, section: Sectio
   return { campaign: cur, failed };
 }
 
-export async function expandAll(s: LlmSettings, c: Campaign, cb: ExpandCallbacks = {}) {
+/**
+ * Expand the whole campaign: pitch, villain, factions, NPCs, locations, acts — and then every
+ * session that hasn't been played yet (recap, read-aloud text, NPC lines, clues).
+ */
+export async function expandAll(s: LlmSettings, c: Campaign, cb: ExpandCallbacks = {}, opts: { sessions?: boolean } = { sessions: true }) {
   let cur = c;
   const failed: string[] = [];
   for (const sec of SECTIONS) {
     const r = await expandSection(s, cur, sec, cb);
     cur = { ...r.campaign, aiExpanded: true };
     failed.push(...r.failed);
+  }
+  if (opts.sessions !== false) {
+    const todo = cur.sessions.filter((x) => x.status !== 'played');
+    for (let i = 0; i < todo.length; i++) {
+      const target = cur.sessions.find((x) => x.id === todo[i].id)!;
+      cb.onProgress?.(`Writing session ${target.number} (${i + 1} of ${todo.length})…`);
+      try {
+        const written = await writeSession(s, cur, target, cb);
+        cur = { ...cur, sessions: cur.sessions.map((x) => (x.id === written.id ? written : x)) };
+        cb.onUpdate?.(cur);
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') throw e;
+        failed.push(`Session ${target.number}`);
+      }
+    }
   }
   return { campaign: cur, failed };
 }
@@ -191,4 +211,30 @@ export async function expandOne(s: LlmSettings, c: Campaign, kind: EntityKind, i
   const v = Object.entries(b).find(([k]) => k.toUpperCase() === key)?.[1] ?? Object.values(b)[0] ?? (text.includes('@@') ? '' : text.trim());
   if (!v) throw new Error('The model reply had no usable text. Try again or pick another model.');
   return v;
+}
+
+/**
+ * Merge AI-written text from `result` onto the user's newest campaign `latest`, so edits made while
+ * the AI was working (renames, notes, re-rolls, play logs) are never overwritten.
+ */
+export function mergeAi(latest: Campaign, result: Campaign): Campaign {
+  const desc = <T extends { id: string; description?: string }>(mine: T[], theirs: T[]) =>
+    mine.map((x) => { const t = theirs.find((y) => y.id === x.id); return t?.description && t.description !== x.description ? { ...x, description: t.description } : x; });
+  return {
+    ...latest,
+    pitch: result.pitch !== latest.pitch && result.pitch ? result.pitch : latest.pitch,
+    villain: result.villain.id === latest.villain.id && result.villain.description ? { ...latest.villain, description: result.villain.description } : latest.villain,
+    npcs: desc(latest.npcs, result.npcs),
+    factions: desc(latest.factions, result.factions),
+    locations: desc(latest.locations, result.locations),
+    acts: desc(latest.acts, result.acts),
+    sessions: latest.sessions.map((x) => {
+      const t = result.sessions.find((y) => y.id === x.id);
+      if (!t || !t.recap || (t.recap === x.recap && t.strongStart === x.strongStart)) return x;
+      // take the AI's writing, keep the user's play state
+      return { ...t, status: x.status, playLog: x.playLog, gameId: x.gameId, number: x.number };
+    }),
+    aiExpanded: result.aiExpanded || latest.aiExpanded,
+    updatedAt: Date.now(),
+  };
 }

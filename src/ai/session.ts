@@ -56,12 +56,17 @@ ${session.scenes.map((_, i) => `@@S${i + 1} — boxed read-aloud text for scene 
 ${npcIds.map((id) => `@@${al.toAlias.get(id)} — 2-3 lines of sample dialogue for ${npc(id)?.name}, in their voice.`).join('\n')}
 @@SECRETS — 8 secrets and clues the party can discover this session, one per line starting with "- ", connected to the campaign.`;
 
-  const text = await chat(s, [
+  const ask = (extra = '') => chat(s, [
     { role: 'system', content: `${SYSTEM}\n\n${FORMAT}` },
-    { role: 'user', content: `Campaign skeleton:\n${JSON.stringify(skeleton(c, al))}\n\n${task}\n\nRemember: "@@KEY" blocks only, no JSON.` },
+    { role: 'user', content: `Campaign skeleton:\n${JSON.stringify(skeleton(c, al))}\n\n${task}\n\nRemember: "@@KEY" blocks only, no JSON.${extra}` },
   ], { maxTokens: 10000, signal: cb.signal, onDelta: cb.onDelta });
 
-  const raw = parseBlocks(text);
+  let raw = parseBlocks(await ask());
+  if (Object.keys(raw).length < 3) {
+    // Unusable reply (no or too few blocks): ask once more, more strictly.
+    cb.onDelta?.('\n[reply had no usable @@ blocks: asking again]\n');
+    raw = parseBlocks(await ask('\nYour previous reply did not follow the format. Start your reply with the line "@@TITLE" and give EVERY block listed above.'));
+  }
   const b: Record<string, string> = {};
   for (const [k, v] of Object.entries(raw)) b[k.toUpperCase()] = v;
   if (!Object.keys(b).length) throw new Error('The model reply had no "@@" blocks. Try again, or pick a different model.');
