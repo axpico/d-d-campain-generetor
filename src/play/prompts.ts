@@ -147,6 +147,7 @@ HOW YOU RUN THE GAME:
 - Narrate vividly but briefly (80-160 words), voice NPCs, then hand it back to the players: ask what they do, or react to what they just did.
 - Never decide the outcome of an uncertain action yourself: call for a roll with a tag. The engine posts the result right after your message; narrate the consequence on your next turn.
 - Never speak or decide for the player characters.
+- Address specific characters by name when it's their moment; not everyone has to answer every time, and players may stay quiet.
 - Follow the scene plan, but improvise when the players go off-script; that is what a good DM does. Use [SCENE next] when a scene is resolved.
 - Start fights with [COMBAT ...] using standard SRD monster names. The engine handles initiative, turns and damage.
 - Reveal secrets and clues naturally when players investigate or talk to the right people.
@@ -158,7 +159,8 @@ ${DM_TAGS}${g.rules?.images === 'tags' || g.rules?.images === 'both' ? IMAGE_TAG
 export function dmExploreUser(g: GameState): string {
   const notes = g.directorNotes.length ? `\n\nPRIVATE DIRECTOR NOTES from the human running the app (follow them, don't mention them):\n${g.directorNotes.map((n) => `- ${n}`).join('\n')}` : '';
   const party = g.creatures.filter((c) => c.kind === 'pc').map((c) => creatureLine(c, undefined, true)).join('\n');
-  return `TRANSCRIPT SO FAR:\n${transcript(g, 'dm') || '(the session is just starting: open with the recap and the strong start)'}\n\nPARTY STATUS:\n${party}${notes}\n\nYour turn as DM. Write your narration (with tags where needed).`;
+  const quiet = g.quietRounds ? `\n\nNobody at the table reacted to your last message. Don't wait: move the story forward (an event, an NPC acts or speaks, a new detail, or advance to the next scene), and address a specific character by name.` : '';
+  return `TRANSCRIPT SO FAR:\n${transcript(g, 'dm') || '(the session is just starting: open with the recap and the strong start)'}\n\nPARTY STATUS:\n${party}${notes}${quiet}\n\nYour turn as DM. Write your narration (with tags where needed).`;
 }
 
 export function dmMonsterTurn(g: GameState, m: Creature): string {
@@ -217,12 +219,20 @@ How to play:
 
 export function playerExploreUser(g: GameState, sh: PcSheet): string {
   const others = g.sheets.filter((x) => x.id !== sh.id).map((x) => `${x.name} (${x.species} ${x.cls})`).join(', ');
+  const free = (g.rules?.flow ?? 'free') === 'free';
+  const spoke = g.roundSpoken?.[g.seats.find((s) => s.sheetId === sh.id)?.id ?? ''] ?? 0;
   return `Other characters: ${others || 'none'}.
 
 TRANSCRIPT SO FAR:
 ${transcript(g, 'player')}
 
-It's your moment. Reply with 1-3 lines:
+${free ? `You may act now if ${sh.name} would. Like a real player, you don't have to speak every time:
+- Act if the DM addressed ${sh.name}, if something concerns ${sh.name}'s goals or backstory, if you have a real idea, or if another character spoke to you.
+- Reply with exactly PASS if you have nothing meaningful to add right now (another character is already handling it, or you'd just repeat them).${spoke ? `
+- You already spoke this round; only continue if someone answered you or asked you something.` : ''}
+- To get a reaction from another character, address them by name.
+
+If you act, reply with 1-3 lines:` : "It's your moment. Reply with 1-3 lines:"}
 SAY: "what ${sh.name} says"
 DO: what ${sh.name} tries to do (optional)`;
 }

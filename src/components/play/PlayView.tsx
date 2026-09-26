@@ -73,6 +73,7 @@ function PlaySetup({ c, onChange, session, sessions, onSession, onStart }: {
   const [flanking, setFlanking] = useState(false);
   const [autoShield, setAutoShield] = useState(true);
   const [images, setImages] = useState<'off' | 'tags' | 'scenes' | 'both'>('off');
+  const [flow, setFlow] = useState<'free' | 'round'>('free');
   const aiNeeded = dm.controller === 'ai' || sheets.some((sh) => seatOf(sh).controller === 'ai');
 
   return (
@@ -125,6 +126,12 @@ function PlaySetup({ c, onChange, session, sessions, onSession, onStart }: {
         <p className="muted small">The full transcript is sent every turn. Only if it grows past this size are the oldest events summarized, so small-context free models don't break. ~4 characters ≈ 1 token.</p>
         <label className="check"><input type="checkbox" checked={flanking} onChange={(e) => setFlanking(e.target.checked)} /> <span>Optional rule: <strong>flanking</strong> (advantage on melee attacks when an ally is on the opposite side of the target)</span></label>
         <label className="check"><input type="checkbox" checked={autoShield} onChange={(e) => setAutoShield(e.target.checked)} /> <span>Casters who know <strong>Shield</strong> cast it automatically when it would turn a hit into a miss</span></label>
+        <label className="field"><span>Table flow (outside combat)</span>
+          <select value={flow} onChange={(e) => setFlow(e.target.value as 'free' | 'round')}>
+            <option value="free">Free: players speak when they want to (may pass), and react to each other</option>
+            <option value="round">Round: after the DM, every player speaks in turn</option>
+          </select>
+        </label>
         <label className="field"><span>Automatic images <span className="muted">(uses your image provider from Settings; paid providers cost per image)</span></span>
           <select value={images} onChange={(e) => setImages(e.target.value as typeof images)}>
             <option value="off">Off</option>
@@ -138,7 +145,7 @@ function PlaySetup({ c, onChange, session, sessions, onSession, onStart }: {
           <button className="btn primary big" disabled={aiNeeded && !llm.enabled} onClick={async () => {
             try {
               const allSeats: Seat[] = [dm, ...sheets.map((sh) => seatOf(sh))];
-              onStart(await newGame(c, session, allSeats, sheets, budget, { flanking, autoShield, images }));
+              onStart(await newGame(c, session, allSeats, sheets, budget, { flanking, autoShield, images, flow }));
             } catch (e) { toast(`Couldn't start: ${(e as Error).message}`, 'error'); }
           }}>⚔ Start the game</button>
         </div>
