@@ -11,6 +11,8 @@ export interface LlmSettings {
   apiKey: string;
   model: string;
   temperature: number;
+  /** How much reasoning models may "think" before answering (OpenRouter only). */
+  reasoning: 'low' | 'medium' | 'high' | 'off' | 'default';
 }
 
 export const LLM_PROVIDERS: Record<LlmProviderId, { label: string; baseUrl: string; model: string; needsKey: boolean; note?: string }> = {
@@ -25,7 +27,7 @@ export const LLM_PROVIDERS: Record<LlmProviderId, { label: string; baseUrl: stri
 
 const KEY = 'llm-settings';
 export const DEFAULT_LLM: LlmSettings = {
-  enabled: false, provider: 'openrouter', baseUrl: LLM_PROVIDERS.openrouter.baseUrl, apiKey: '', model: LLM_PROVIDERS.openrouter.model, temperature: 0.9,
+  enabled: false, provider: 'openrouter', baseUrl: LLM_PROVIDERS.openrouter.baseUrl, apiKey: '', model: LLM_PROVIDERS.openrouter.model, temperature: 0.9, reasoning: 'low',
 };
 export const loadLlm = () => loadSetting(KEY, DEFAULT_LLM);
 export const saveLlm = (s: LlmSettings) => saveSetting(KEY, s);
@@ -60,8 +62,10 @@ const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, 
 });
 
 class HttpError extends Error {
-  constructor(public status: number, message: string, public retryAfter?: number) { super(message); }
+  constructor(public status: number, message: string, public retryAfter?: number, public thinkingExhausted = false) { super(message); }
 }
+
+interface Attempt { maxTokens: number; reasoning: LlmSettings['reasoning'] }
 
 /** Remove chain-of-thought blocks some reasoning models put inline. */
 export function stripThink(text: string): string {
@@ -86,9 +90,9 @@ async function readSse(res: Response, onData: (data: string) => void) {
   }
 }
 
-async function once(s: LlmSettings, messages: ChatMessage[], opts: ChatOpts): Promise<string> {
+async function once(s: LlmSettings, messages: ChatMessage[], opts: ChatOpts, attempt: Attempt): Promise<string> {
   const base = s.baseUrl.replace(/\/+$/, '');
-  const maxTokens = opts.maxTokens ?? 4000;
+  const maxTokens = attempt.maxTokens;
   const stream = !!opts.onDelta;
   const anthropic = s.provider === 'anthropic';
 
@@ -108,6 +112,10 @@ async function once(s: LlmSettings, messages: ChatMessage[], opts: ChatOpts): Pr
       headers['X-Title'] = 'D&D Campaign Generator';
     }
     body = { model: s.model, messages, temperature: s.temperature, max_tokens: maxTokens, stream };
+    // OpenRouter's unified reasoning control; ignored by models that don't reason.
+    if (s.provider === 'openrouter' && attempt.reasoning !== 'default') {
+      body.reasoning = attempt.reasoning === 'off' ? { enabled: false } : { effort: attempt.reasoning };
+    }
   }
 
   let res: Response;
@@ -157,9 +165,11 @@ async function once(s: LlmSettings, messages: ChatMessage[], opts: ChatOpts): Pr
   }
 
   out = stripThink(out);
+  // Some reasoning models leave the actual answer inside the reasoning text.
+  if (!out && reasoning.includes('@@')) out = reasoning.slice(reasoning.indexOf('@@'));
   if (!out) {
     if (reasoning && /length|max_tokens/.test(finish)) {
-      throw new HttpError(0, 'The model spent its whole output budget "thinking" and wrote no answer. Try a non-reasoning model, or it will be retried.');
+      throw new HttpError(0, `The model used all ${maxTokens} output tokens "thinking" and wrote no answer. If this keeps happening, set Reasoning to "Off" in Settings or pick a non-reasoning model.`, undefined, true);
     }
     throw new HttpError(0, 'The model returned an empty reply.');
   }
@@ -172,12 +182,24 @@ async function once(s: LlmSettings, messages: ChatMessage[], opts: ChatOpts): Pr
  */
 export async function chat(s: LlmSettings, messages: ChatMessage[], opts: ChatOpts = {}): Promise<string> {
   let lastErr: unknown;
+  const att: Attempt = { maxTokens: opts.maxTokens ?? 4000, reasoning: s.reasoning ?? 'low' };
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      return await once(s, messages, opts);
+      return await once(s, messages, opts, att);
     } catch (e) {
       if ((e as Error).name === 'AbortError') throw e;
       lastErr = e;
+      if (e instanceof HttpError && e.status === 400 && /reason/i.test(e.message) && att.reasoning !== 'default') {
+        att.reasoning = 'default'; // model doesn't accept the reasoning parameter: send without it
+        continue;
+      }
+      if ((e as HttpError).thinkingExhausted) {
+        // Retrying the same request would fail the same way: give it room and ask it to think less.
+        att.maxTokens = Math.min(32000, att.maxTokens * 2);
+        if (att.reasoning !== 'off') att.reasoning = att.reasoning === 'high' || att.reasoning === 'medium' || att.reasoning === 'default' ? 'low' : 'off';
+        opts.onDelta?.(`\n[model ran out of tokens while thinking: retrying with ${att.maxTokens} tokens, reasoning ${att.reasoning}]\n`);
+        continue;
+      }
       const status = e instanceof HttpError ? e.status : -1;
       const retryable = status === 0 || status === 408 || status === 429 || status >= 500;
       if (!retryable || attempt === 3) break;

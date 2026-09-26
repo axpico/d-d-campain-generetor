@@ -108,7 +108,7 @@ function apply(c: Campaign, section: Exclude<Section, 'overview'>, texts: Map<st
 async function batch(s: LlmSettings, c: Campaign, al: Aliases, section: Exclude<Section, 'overview'>, ids: string[], cb: ExpandCallbacks) {
   const list = ids.map((id) => `@@${al.toAlias.get(id)} = ${nameOf(c, id)}`).join('\n');
   const text = await chat(s, msgs(c, al, `Write descriptions for these ${section} (${WHAT[section]}). Use exactly these keys:\n${list}`), {
-    maxTokens: section === 'acts' ? 2000 : 1800, signal: cb.signal, onDelta: cb.onDelta,
+    maxTokens: 6000, signal: cb.signal, onDelta: cb.onDelta,
   });
   const blocks = parseBlocks(text);
   const got = new Map<string, string>();
@@ -126,7 +126,7 @@ export async function expandSection(s: LlmSettings, c: Campaign, section: Sectio
   if (section === 'overview') {
     cb.onProgress?.('Writing pitch and villain…');
     const text = await chat(s, msgs(c, al, 'Write two blocks.\n@@PITCH: a 120-180 word campaign pitch for the DM — the central conflict and why the party matters.\n@@VILLAIN: 180-250 words — the villain\'s history, how they became this, their methods, how they escalate across the acts, and how their weakness can be discovered.'), {
-      maxTokens: 1500, signal: cb.signal, onDelta: cb.onDelta,
+      maxTokens: 5000, signal: cb.signal, onDelta: cb.onDelta,
     });
     const b = Object.fromEntries(Object.entries(parseBlocks(text)).map(([k, v]) => [k.toUpperCase(), v]));
     const campaign = { ...c, pitch: b.PITCH || c.pitch, villain: { ...c.villain, description: b.VILLAIN || c.villain.description } };
@@ -185,7 +185,7 @@ export async function expandOne(s: LlmSettings, c: Campaign, kind: EntityKind, i
   };
   const key = kind === 'villain' ? 'VILLAIN' : al.toAlias.get(id) ?? 'TEXT';
   const text = await chat(s, msgs(c, al, `Write a fresh description for ${kind === 'villain' ? 'the villain' : `${key} (${nameOf(c, id)})`}: ${lengths[kind]}. Output one block: @@${key}`), {
-    maxTokens: 1500, signal: cb.signal, onDelta: cb.onDelta,
+    maxTokens: 5000, signal: cb.signal, onDelta: cb.onDelta,
   });
   const b = parseBlocks(text);
   const v = Object.entries(b).find(([k]) => k.toUpperCase() === key)?.[1] ?? Object.values(b)[0] ?? (text.includes('@@') ? '' : text.trim());
