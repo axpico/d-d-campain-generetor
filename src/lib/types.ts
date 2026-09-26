@@ -1,3 +1,5 @@
+import type { PcSheet } from '../play/types';
+
 export type Tone =
   | 'heroic'
   | 'dark'
@@ -241,6 +243,7 @@ export interface Session {
   playLog?: string; // what actually happened at the table
   adapted?: boolean; // rewritten from the play log
   aiNotes?: string;
+  gameId?: string; // play-mode game for this session
 }
 
 export interface RegionTerrainCell {
@@ -273,6 +276,7 @@ export interface Campaign {
   region: Region;
   rumors: string[];
   sessions: Session[];
+  sheets?: PcSheet[]; // full character sheets for play mode
   aiExpanded?: boolean;
   mapImageId?: string; // AI-illustrated region map
 }

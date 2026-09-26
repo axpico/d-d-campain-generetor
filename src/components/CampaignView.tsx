@@ -14,10 +14,11 @@ import { ImageSlot } from './ImageSlot';
 import { AiButton, EncounterCard, Field, Loot, Pill, Reroll } from './bits';
 import { Editable } from './Editable';
 import { SessionsView } from './SessionsView';
+import { PlayView } from './play/PlayView';
 import { useApp } from './context';
 
-type Tab = 'overview' | 'acts' | 'sessions' | 'npcs' | 'factions' | 'locations' | 'maps';
-const TABS: [Tab, string][] = [['overview', 'Overview'], ['acts', 'Acts'], ['sessions', 'Sessions'], ['npcs', 'NPCs'], ['factions', 'Factions'], ['locations', 'Locations'], ['maps', 'World map']];
+type Tab = 'overview' | 'acts' | 'sessions' | 'play' | 'npcs' | 'factions' | 'locations' | 'maps';
+const TABS: [Tab, string][] = [['overview', 'Overview'], ['acts', 'Acts'], ['sessions', 'Sessions'], ['play', '▶ Play'], ['npcs', 'NPCs'], ['factions', 'Factions'], ['locations', 'Locations'], ['maps', 'World map']];
 
 export function CampaignView({ c, onChange, saved, onSave, onNew }: {
   c: Campaign;
@@ -29,6 +30,7 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
   const { llm, toast, runAi, aiBusy } = useApp();
   const [tab, setTab] = useState<Tab>('overview');
   const [focusLoc, setFocusLoc] = useState<string>();
+  const [playSession, setPlaySession] = useState<string>();
   const [embed, setEmbed] = useState(true);
   // Always read the newest campaign inside async AI callbacks.
   const latest = useRef(c);
@@ -212,8 +214,15 @@ export function CampaignView({ c, onChange, saved, onSave, onNew }: {
       {/* ---------------- Sessions ---------------- */}
       <section className={`tab-panel ${tab === 'sessions' ? '' : 'tab-hidden'}`}>
         <h2 className="print-only">Sessions</h2>
-        <SessionsView c={c} onChange={onChange} goLoc={goLoc} />
+        <SessionsView c={c} onChange={onChange} goLoc={goLoc} onPlay={(id) => { setPlaySession(id); setTab('play'); window.scrollTo(0, 0); }} />
       </section>
+
+      {/* ---------------- Play ---------------- */}
+      {tab === 'play' && (
+        <section className="tab-panel no-print">
+          <PlayView c={c} onChange={onChange} sessionId={playSession} />
+        </section>
+      )}
 
       {/* ---------------- NPCs ---------------- */}
       <section className={`tab-panel ${tab === 'npcs' ? '' : 'tab-hidden'}`}>

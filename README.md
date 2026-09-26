@@ -23,6 +23,13 @@ A browser app that generates complete D&D 5e (2024 rules) campaigns: villain, pl
 - **Side quests** in every act, with a quest giver and a reward.
 - **Ambient music:** 12 moods (tavern, dungeon, battle, boss, horror, sea…) generated live in the browser with the Web Audio API. No files, no network, no copyright. Every scene has a ♪ button that crossfades to its mood.
 - **Table tools:** dice roller (`2d6+3`, `1d20 adv`, `4d6kh3`), initiative tracker with HP and conditions, and quick improvisation generators (NPC, names, encounter, loot, rumor, complication).
+- **▶ Play mode:** an AI or human DM runs a session with any mix of AI and human players (hot-seat). Each seat can use its own provider and model.
+  - **The code owns the rules:** dice, attacks with advantage/disadvantage from conditions, crits, resistances, saves, concentration, death saves, the action economy, opportunity attacks, recharge abilities, legendary actions, rests. The models only choose actions and narrate.
+  - **Full character sheets** with a class/level template to start from. About 70 core spells are automated; any other spell or feature is adjudicated by the DM through tags that the engine rolls.
+  - **Monster stat blocks** come from the SRD for every encounter.
+  - **At the table:** auto-play with pause, step and speed controls; live streaming; a turn tracker with HP and conditions; private "director" notes to the DM; DM tools usable any time; automatic music moods.
+  - **Memory:** the full transcript is sent each turn, and only the oldest part is summarized once it exceeds your budget.
+  - **After the session:** the transcript becomes the session's play log.
 - **Edit anything:** every description, read-aloud box, title and note can be edited by hand (✎).
 - **Shareable seeds:** the same seed and options produce the same skeleton.
 - **Campaign content:** villain (motivation, plan, weakness, lair, lieutenants, SRD stat block to reskin), acts with hooks, goals, climaxes and rewards, factions, NPCs with secrets and wants, rumor table.
@@ -75,4 +82,8 @@ Stack: React 19, TypeScript, Vite. There is no backend.
 
 ## License notes
 
-Monster and magic item names reference the *System Reference Document 5.2* by Wizards of the Coast LLC, licensed under [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/). All tables, names and text generators are original.
+Monster and magic item names in the generator reference the *System Reference Document 5.2* by Wizards of the Coast LLC.
+
+Play mode's monster stat blocks (`src/data/srd/monsters.json`) include material taken from the *System Reference Document 5.1* by Wizards of the Coast LLC. They were converted with `scripts/build-srd.mjs` from Open5e's republication, via the npm package `@adkinn/fifth-edition-srd-mcp`. Both SRDs are licensed under [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/). Where the generator uses a 2024 monster name that is missing from SRD 5.1, play mode uses the closest 5.1 stat block.
+
+All tables, names and text generators are original.

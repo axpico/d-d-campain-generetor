@@ -10,7 +10,7 @@ const KIND_ICON: Record<SceneKind, string> = {
   social: '🗣', exploration: '🔍', combat: '⚔', puzzle: '🧩', travel: '🧭', rest: '🔥', infiltration: '🗝',
 };
 
-export function SessionsView({ c, onChange, goLoc }: { c: Campaign; onChange: (c: Campaign) => void; goLoc: (id: string) => void }) {
+export function SessionsView({ c, onChange, goLoc, onPlay }: { c: Campaign; onChange: (c: Campaign) => void; goLoc: (id: string) => void; onPlay: (sessionId: string) => void }) {
   const { llm, runAi, aiBusy, toast } = useApp();
   const firstOpen = c.sessions.find((s) => s.status !== 'played') ?? c.sessions[0];
   const [sel, setSel] = useState<string | undefined>(firstOpen?.id);
@@ -93,6 +93,7 @@ export function SessionsView({ c, onChange, goLoc }: { c: Campaign; onChange: (c
             <button className="btn primary" disabled={!llm.enabled || aiBusy} onClick={() => aiWrite(s)} title={llm.enabled ? '' : 'Set up an AI provider in Settings'}>
               ✨ {s.recap ? 'Rewrite with AI' : 'Write with AI'}
             </button>
+            <button className="btn" onClick={() => onPlay(s.id)} title="Play this session with an AI or human DM and players">▶ {s.gameId ? 'Continue game' : 'Play'}</button>
             <Reroll onClick={() => onChange(rerollSession(c, s.id))} title="Re-roll this session's skeleton" />
             <button className="btn ghost" onClick={() => { const n = insertSession(c, s.id); onChange(n); setSel(n.sessions[n.sessions.findIndex((x) => x.id === s.id) + 1].id); }}>＋ Insert session after</button>
             <button className="btn ghost" onClick={printSession}>🖨 Print session</button>
